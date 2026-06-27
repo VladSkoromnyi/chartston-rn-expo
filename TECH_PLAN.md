@@ -104,7 +104,7 @@ a green QA checklist. Each stage branches off `develop` as `feat/stage-N-*` and 
 | Stage | Goal | Key deliverables | New QA | Exit criteria |
 |---|---|---|---|---|
 | **0 — Scaffold** ✅ | Skeleton + harness | §5.1 dirs, full `types/`, pure `core/`, placeholder `<Chart/>`, linked harness | — | **lib tsc/lint/bob ✅, harness tsc ✅, native run on iOS sim ✅** (placeholder renders; Metro clean). |
-| **1 — Static render** | Draw candles | `render/candles+grid+axes`, `SkFont` registration, typed-array rect/line buffers, theme wiring | rendering group | 500-candle fixture renders pixel-correct vs reference. |
+| **1 — Static render** ⏳ | Draw candles | `render/candles` ✅ (body/wick + up/down/border colors), grid + axis lines ✅, `<Chart/>` adapter→store→autoscale→draw ✅; **next:** `SkFont` axis labels, typed-array rect/line buffers | rendering group | 500-candle dataset renders on device ✅ (`feat/stage-1-static-render`); pixel-correct-vs-reference (with labels) pending. |
 | **2 — Viewport & gestures** | Navigate at scale | `gestures/` (pan→offset, pinch→barSpacing focal-anchored, momentum), viewport clipping, autoscale + log; align reanimated/worklets/GH devDeps to Expo pins | gestures@10k | 10k candles pan/zoom @60fps on device. |
 | **3 — Crosshair & legend** | Inspect bars | long-press snap-to-index crosshair, synchronized OHLCV legend, last-price line | crosshair cases | crosshair reports correct bar; `onCrosshairMove` fires. |
 | **4 — Streaming core** | Live "on the fly" | `CandleStore` ring-buffer optimization, `patch`/`append` wiring, **mock/replay feed**, one-repaint/frame coalescing | live-streaming group | replay mutates active bar + appends with no whole-series flicker. |

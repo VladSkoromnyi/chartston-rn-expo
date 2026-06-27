@@ -26,3 +26,11 @@ export function formatCompact(n: number, digits = 2): string {
   }
   return n.toFixed(0);
 }
+
+/** Time-of-day label (UTC HH:MM) for the time axis. */
+export function formatTimeLabel(ms: number): string {
+  const d = new Date(ms);
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}

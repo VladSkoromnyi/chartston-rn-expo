@@ -9,3 +9,5 @@ export * from './autoscale';
 export * from './format';
 export * from './candle-store';
 export * from './indicators';
+export * from './viewport';
+export * from './ticks';

@@ -1,22 +1,31 @@
 /**
- * Candle geometry builder (PLAN §5.1, RESEARCH §1). Stage 1.
+ * Candle geometry builder (PLAN §5.1, RESEARCH §1).
  *
- * Converts the visible candles into four Skia paths grouped by direction, so the
- * whole series draws in a handful of GPU calls (one `<Path>` per group) rather
- * than one node per bar:
- *   - bodies  = rect(open↔close)   (fill)
- *   - wicks   = line(low↔high)     (stroke)
+ * Converts the visible `[start, end]` range into four Skia paths grouped by
+ * direction, so the whole visible series draws in a handful of GPU calls:
+ *   - bodies = rect(open↔close)  (fill)
+ *   - wicks  = line(low↔high)    (stroke)
  *
- * NOTE (Stage 2): for 10k+ candles under pan/zoom this is rebuilt per gesture
- * frame; the perf refinement swaps to a `useRectBuffer`/`useRSXformBuffer` typed-
- * array path on the UI thread. The grouping-by-direction shape stays the same.
+ * Only the visible range is built (viewport clipping), so cost is bounded by
+ * what's on screen (~hundreds of bars) regardless of total history. Inputs are
+ * plain numbers/arrays (no class instances), so this can run either in a JS memo
+ * (Stage 2) or — as a future perf pass — inside a UI-thread worklet.
+ *
+ * The price→y mapping is inlined here (mirrors `core/coords.priceToY`, the tested
+ * reference) to keep the hot loop allocation-free.
  */
 
 import { Skia } from '@shopify/react-native-skia';
 import type { SkPath } from '@shopify/react-native-skia';
-import { indexToCenterX, priceToY } from '../core/coords';
-import type { CandleView, PriceRange, Viewport } from '../types';
-import type { PaneGeometry } from './geometry';
+
+/** Plain column arrays for a candle series. */
+export interface CandleColumns {
+  times: number[];
+  opens: number[];
+  highs: number[];
+  lows: number[];
+  closes: number[];
+}
 
 export interface CandleGeometry {
   upBodies: SkPath;
@@ -29,35 +38,51 @@ export interface CandleGeometry {
 const BODY_WIDTH_RATIO = 0.7;
 
 export function buildCandleGeometry(
-  view: CandleView,
-  viewport: Viewport,
-  range: PriceRange,
-  geom: PaneGeometry
+  cols: CandleColumns,
+  start: number,
+  end: number,
+  offset: number,
+  barSpacing: number,
+  rangeMin: number,
+  rangeMax: number,
+  height: number,
+  logScale: boolean
 ): CandleGeometry {
   const upBodies = Skia.Path.Make();
   const downBodies = Skia.Path.Make();
   const upWicks = Skia.Path.Make();
   const downWicks = Skia.Path.Make();
 
-  const visible = geom.width / viewport.barSpacing;
-  const start = Math.max(0, Math.floor(viewport.offset));
-  const end = Math.min(view.length - 1, Math.ceil(viewport.offset + visible));
-  const bodyWidth = Math.max(1, viewport.barSpacing * BODY_WIDTH_RATIO);
+  const bodyWidth = Math.max(1, barSpacing * BODY_WIDTH_RATIO);
   const half = bodyWidth / 2;
-  const log = viewport.logScale;
+  const lmin = logScale ? Math.log(rangeMin) : 0;
+  const lspan = logScale ? Math.log(rangeMax) - lmin : 1;
+  const span = rangeMax - rangeMin || 1;
 
   for (let i = start; i <= end; i++) {
-    const open = view.opens[i]!;
-    const close = view.closes[i]!;
-    const high = view.highs[i]!;
-    const low = view.lows[i]!;
+    const open = cols.opens[i]!;
+    const close = cols.closes[i]!;
+    const high = cols.highs[i]!;
+    const low = cols.lows[i]!;
     const up = close >= open;
+    const cx = (i - offset) * barSpacing + barSpacing / 2;
 
-    const cx = indexToCenterX(i, viewport);
-    const yHigh = priceToY(high, range, geom.height, log);
-    const yLow = priceToY(low, range, geom.height, log);
-    const yOpen = priceToY(open, range, geom.height, log);
-    const yClose = priceToY(close, range, geom.height, log);
+    const tHigh = logScale
+      ? (Math.log(high) - lmin) / lspan
+      : (high - rangeMin) / span;
+    const tLow = logScale
+      ? (Math.log(low) - lmin) / lspan
+      : (low - rangeMin) / span;
+    const tOpen = logScale
+      ? (Math.log(open) - lmin) / lspan
+      : (open - rangeMin) / span;
+    const tClose = logScale
+      ? (Math.log(close) - lmin) / lspan
+      : (close - rangeMin) / span;
+    const yHigh = height - tHigh * height;
+    const yLow = height - tLow * height;
+    const yOpen = height - tOpen * height;
+    const yClose = height - tClose * height;
     const top = Math.min(yOpen, yClose);
     const bodyHeight = Math.max(1, Math.abs(yClose - yOpen)); // min 1px so a doji is visible
 

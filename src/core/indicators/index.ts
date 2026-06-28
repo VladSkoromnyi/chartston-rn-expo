@@ -1,14 +1,11 @@
 /**
- * Indicator registry (PLAN §6.3, RESEARCH §9). Studies are declarative
- * {@link StudyDescriptor}s so consumers can ship their own.
- *
- * TODO(stage-7): built-in descriptors — overlays (SMA, EMA, WMA, Bollinger,
- * VWAP) and panes (Volume, RSI, MACD, Stochastic, ATR). Each `compute` is pure
- * and incremental (Wilder smoothing for RSI/ATR — see RESEARCH §9), validated
- * against reference fixtures in the test plan.
+ * Indicators (PLAN §6.3, RESEARCH §9): the pure {@link calculators} plus a small
+ * registry of declarative {@link StudyDescriptor}s so consumers can ship their own.
  */
 
 import type { StudyDescriptor } from '../../types';
+
+export * from './calculators';
 
 const registry = new Map<string, StudyDescriptor>();
 

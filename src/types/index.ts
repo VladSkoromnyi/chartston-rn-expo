@@ -211,6 +211,29 @@ export interface StudyDescriptor<S extends StudyState = StudyState> {
 }
 
 // ----------------------------------------------------------------------------
+// Built-in studies (Stage 7) — the batteries-included indicators <Chart/> draws
+// natively, toggled via the IndicatorMenu. (The declarative StudyDescriptor API
+// above is the extensibility seam for custom studies; this is the curated set.)
+// ----------------------------------------------------------------------------
+
+/** Built-in overlays drawn on the price pane. */
+export type OverlayStudyId = 'sma' | 'ema' | 'bollinger' | 'vwap';
+
+/** Built-in studies drawn in their own stacked sub-pane below the price pane. */
+export type PaneStudyId = 'volume' | 'rsi' | 'macd';
+
+export type BuiltinStudyId = OverlayStudyId | PaneStudyId;
+
+/**
+ * Which built-in studies are active. Overlays render on the price pane; panes
+ * render as stacked sub-panes (in the order listed) sharing the x-axis.
+ */
+export interface ChartStudiesConfig {
+  overlays: OverlayStudyId[];
+  panes: PaneStudyId[];
+}
+
+// ----------------------------------------------------------------------------
 // Theme (color model from RESEARCH §1 — up/down/border/wick set separately)
 // ----------------------------------------------------------------------------
 
@@ -260,7 +283,11 @@ export interface SelectListProps<T> {
   title?: string;
   options: SelectOption<T>[];
   selectedId?: string;
+  /** Ids to mark selected in multi-select mode (checkmark per row). */
+  selectedIds?: string[];
   searchable?: boolean; //                          symbols list -> true
+  /** Keep the sheet open after a tap (multi-select). Defaults to true (close). */
+  closeOnSelect?: boolean;
   onSelect: (option: SelectOption<T>) => void; //   <-- interactivity contract
   renderRow?: (o: SelectOption<T>) => ReactNode; //  override for custom rows
   snapPoints?: (string | number)[];
@@ -276,7 +303,10 @@ export interface ChartProps {
   symbol: SymbolInfo;
   interval: Interval;
   adapter: MarketFeedAdapter;
+  /** Custom declarative studies (extensibility seam). */
   studies?: StudyDescriptor[];
+  /** Built-in studies to draw (overlays + sub-panes); see {@link ChartStudiesConfig}. */
+  activeStudies?: ChartStudiesConfig;
   theme?: ChartTheme;
   chartType?: ChartType;
   style?: StyleProp<ViewStyle>;

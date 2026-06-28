@@ -36,6 +36,7 @@ import type { Candle, CandleUpdate, ChartProps } from '../types';
 import { DARK_THEME } from '../theme';
 import {
   candlesToColumns,
+  ema,
   formatCompact,
   formatPrice,
   formatTimeLabel,
@@ -44,18 +45,21 @@ import {
   initialViewport,
   niceTicks,
   priceToY,
+  sma,
   visibleRange,
   yToPrice,
 } from '../core';
 import type { CandleColumns } from '../core';
-import { buildCandleGeometry } from '../render';
+import { buildCandleGeometry, buildLinePath } from '../render';
 import { useChartGestures } from '../gestures';
 
 const PRICE_AXIS_WIDTH = 56;
 const TIME_AXIS_HEIGHT = 24;
 const DEFAULT_BAR_SPACING = 8;
 const PRICE_TICK_COUNT = 5;
-const TIME_TICK_COUNT = 5;
+const TIME_LABEL_MIN_PX = 64;
+const OVERLAY_SMA_COLOR = '#f0b90b';
+const OVERLAY_EMA_COLOR = '#3b82f6';
 const LEGEND_STEP = 70;
 
 const FONT_FAMILY = Platform.select({
@@ -225,6 +229,12 @@ export function Chart(props: ChartProps): ReactElement {
   };
 
   // Rebuild geometry + autoscale + axis ticks (JS, viewport-clipped).
+  // Overlay studies — computed on data change only, not per pan frame.
+  const studies = useMemo(() => {
+    if (!columns || columns.closes.length === 0) return null;
+    return { sma20: sma(columns.closes, 20), ema50: ema(columns.closes, 50) };
+  }, [columns]);
+
   const frame = useMemo(() => {
     if (!columns || plotWidth <= 0 || plotHeight <= 0) return null;
     const len = columns.opens.length;
@@ -266,19 +276,53 @@ export function Chart(props: ChartProps): ReactElement {
       plotHeight,
       false
     );
+    const overlays = studies
+      ? [
+          {
+            path: buildLinePath(
+              studies.sma20,
+              start,
+              end,
+              view.offset,
+              view.barSpacing,
+              range.min,
+              range.max,
+              plotHeight,
+              false
+            ),
+            color: OVERLAY_SMA_COLOR,
+          },
+          {
+            path: buildLinePath(
+              studies.ema50,
+              start,
+              end,
+              view.offset,
+              view.barSpacing,
+              range.min,
+              range.max,
+              plotHeight,
+              false
+            ),
+            color: OVERLAY_EMA_COLOR,
+          },
+        ]
+      : [];
     const priceTicks = niceTicks(range.min, range.max, PRICE_TICK_COUNT).map(
       (value) => ({
         label: formatPrice(value, symbol.pricePrecision),
         y: priceToY(value, range, plotHeight, false),
       })
     );
+    // Space time labels by pixels (not candle count) and align to step multiples,
+    // so they don't overlap when zoomed in or jitter while panning; clip to the plot.
     const timeTicks: { label: string; x: number }[] = [];
-    const stepIdx = Math.max(1, Math.floor((end - start) / TIME_TICK_COUNT));
-    for (let i = start; i <= end; i += stepIdx) {
-      timeTicks.push({
-        label: formatTimeLabel(columns.times[i]!),
-        x: indexToCenterX(i, viewport),
-      });
+    const stepIdx = Math.max(1, Math.ceil(TIME_LABEL_MIN_PX / view.barSpacing));
+    for (let i = Math.ceil(start / stepIdx) * stepIdx; i <= end; i += stepIdx) {
+      const x = indexToCenterX(i, viewport);
+      if (x >= 0 && x <= plotWidth) {
+        timeTicks.push({ label: formatTimeLabel(columns.times[i]!), x });
+      }
     }
 
     const li = len - 1;
@@ -292,13 +336,14 @@ export function Chart(props: ChartProps): ReactElement {
     };
     return {
       geometry,
+      overlays,
       priceTicks,
       timeTicks,
       range,
       last,
       lastY: priceToY(last.close, range, plotHeight, false),
     };
-  }, [columns, view, plotWidth, plotHeight, symbol.pricePrecision]);
+  }, [columns, view, plotWidth, plotHeight, symbol.pricePrecision, studies]);
 
   // Crosshair info (snap to nearest bar on x; free price on y).
   const cross = useMemo(() => {
@@ -455,6 +500,15 @@ export function Chart(props: ChartProps): ReactElement {
                     />
                   </>
                 )}
+                {frame.overlays.map((ov, i) => (
+                  <Path
+                    key={`ov-${i}`}
+                    path={ov.path}
+                    color={ov.color}
+                    style="stroke"
+                    strokeWidth={1.5}
+                  />
+                ))}
               </Group>
             )}
 

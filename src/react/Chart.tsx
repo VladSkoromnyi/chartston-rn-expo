@@ -112,20 +112,33 @@ export function Chart(props: ChartProps): ReactElement {
   });
   const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
   const positioned = useRef(false);
+  const lastTimeRef = useRef(-Infinity);
 
-  // Apply a live update from the feed (Stage 4): patch the active bar or append a new one.
+  // Apply a live update (Stage 4–5). Time-keyed so backfill↔live merges correctly:
+  // a bar whose open time matches the last bar patches it; a newer one appends.
   const applyUpdate = useCallback(
     (u: CandleUpdate) => {
       if (u.type === 'snapshot') {
         setColumns(candlesToColumns(u.candles));
         dataLen.value = u.candles.length;
+        lastTimeRef.current =
+          u.candles.length > 0
+            ? u.candles[u.candles.length - 1]!.time
+            : -Infinity;
         positioned.current = false;
         return;
       }
-      if (u.type === 'append') {
+      const c = u.candle;
+      const last = lastTimeRef.current;
+      let action: 'patch' | 'append';
+      if (c.time > last) action = 'append';
+      else if (c.time === last) action = 'patch';
+      else return; // out of order — ignore
+      if (action === 'append') {
         const prevLen = dataLen.value;
         const newLen = prevLen + 1;
         dataLen.value = newLen;
+        lastTimeRef.current = c.time;
         // Advance the view if it was pinned to the live edge.
         const bs = barSpacing.value;
         const visible = bs > 0 ? plotWidthRef.current / bs : 0;
@@ -134,9 +147,7 @@ export function Chart(props: ChartProps): ReactElement {
           offset.value = Math.max(0, newLen - Math.floor(visible));
         }
       }
-      setColumns((prev) =>
-        prev ? ingestColumns(prev, u.type, u.candle) : prev
-      );
+      setColumns((prev) => (prev ? ingestColumns(prev, action, c) : prev));
     },
     [dataLen, offset, barSpacing]
   );
@@ -152,6 +163,8 @@ export function Chart(props: ChartProps): ReactElement {
         if (cancelled) return;
         setColumns(candlesToColumns(candles));
         dataLen.value = candles.length;
+        lastTimeRef.current =
+          candles.length > 0 ? candles[candles.length - 1]!.time : -Infinity;
         positioned.current = false;
         unsubscribe = adapter.subscribe({
           symbol,

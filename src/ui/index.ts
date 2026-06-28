@@ -6,10 +6,10 @@
  * Consumers must mount a `BottomSheetModalProvider` (from @gorhom/bottom-sheet)
  * above these, inside a `GestureHandlerRootView`.
  *
- * TODO(stage-7): IndicatorMenu (add/remove studies). TODO(stage-8): ChartTypeSelector,
- * ThemeSelector — also thin configs of SelectList.
+ * TODO(stage-8): ChartTypeSelector, ThemeSelector — also thin configs of SelectList.
  */
 
 export * from './SelectList';
 export * from './PeriodSelector';
 export * from './SymbolSelector';
+export * from './IndicatorMenu';

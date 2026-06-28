@@ -283,7 +283,11 @@ export interface SelectListProps<T> {
   title?: string;
   options: SelectOption<T>[];
   selectedId?: string;
+  /** Ids to mark selected in multi-select mode (checkmark per row). */
+  selectedIds?: string[];
   searchable?: boolean; //                          symbols list -> true
+  /** Keep the sheet open after a tap (multi-select). Defaults to true (close). */
+  closeOnSelect?: boolean;
   onSelect: (option: SelectOption<T>) => void; //   <-- interactivity contract
   renderRow?: (o: SelectOption<T>) => ReactNode; //  override for custom rows
   snapPoints?: (string | number)[];

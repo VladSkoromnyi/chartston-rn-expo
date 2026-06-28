@@ -11,7 +11,7 @@
  * viewport; moving the candle rebuild fully onto the UI thread is a perf follow-up.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import type { LayoutChangeEvent } from 'react-native';
@@ -32,21 +32,23 @@ import {
   matchFont,
   vec,
 } from '@shopify/react-native-skia';
-import type { Candle, ChartProps } from '../types';
+import type { Candle, CandleUpdate, ChartProps } from '../types';
 import { DARK_THEME } from '../theme';
 import {
+  candlesToColumns,
   formatCompact,
   formatPrice,
   formatTimeLabel,
   indexToCenterX,
+  ingestColumns,
   initialViewport,
   niceTicks,
   priceToY,
   visibleRange,
   yToPrice,
 } from '../core';
+import type { CandleColumns } from '../core';
 import { buildCandleGeometry } from '../render';
-import type { CandleColumns } from '../render';
 import { useChartGestures } from '../gestures';
 
 const PRICE_AXIS_WIDTH = 56;
@@ -91,6 +93,8 @@ export function Chart(props: ChartProps): ReactElement {
   const { width, height } = size;
   const plotWidth = width - PRICE_AXIS_WIDTH;
   const plotHeight = height - TIME_AXIS_HEIGHT;
+  const plotWidthRef = useRef(0);
+  plotWidthRef.current = plotWidth;
 
   const [columns, setColumns] = useState<CandleColumns | null>(null);
 
@@ -109,24 +113,56 @@ export function Chart(props: ChartProps): ReactElement {
   const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
   const positioned = useRef(false);
 
-  // Load history.
+  // Apply a live update from the feed (Stage 4): patch the active bar or append a new one.
+  const applyUpdate = useCallback(
+    (u: CandleUpdate) => {
+      if (u.type === 'snapshot') {
+        setColumns(candlesToColumns(u.candles));
+        dataLen.value = u.candles.length;
+        positioned.current = false;
+        return;
+      }
+      if (u.type === 'append') {
+        const prevLen = dataLen.value;
+        const newLen = prevLen + 1;
+        dataLen.value = newLen;
+        // Advance the view if it was pinned to the live edge.
+        const bs = barSpacing.value;
+        const visible = bs > 0 ? plotWidthRef.current / bs : 0;
+        const wasPinned = offset.value + visible >= prevLen - 1;
+        if (wasPinned && plotWidthRef.current > 0) {
+          offset.value = Math.max(0, newLen - Math.floor(visible));
+        }
+      }
+      setColumns((prev) =>
+        prev ? ingestColumns(prev, u.type, u.candle) : prev
+      );
+    },
+    [dataLen, offset, barSpacing]
+  );
+
+  // Load history, then subscribe for live patch/append updates.
   useEffect(() => {
     let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
     const controller = new AbortController();
     adapter
       .fetchHistory({ symbol, interval, signal: controller.signal })
       .then((candles) => {
         if (cancelled) return;
-        setColumns({
-          times: candles.map((c) => c.time),
-          opens: candles.map((c) => c.open),
-          highs: candles.map((c) => c.high),
-          lows: candles.map((c) => c.low),
-          closes: candles.map((c) => c.close),
-          volumes: candles.map((c) => c.volume ?? 0),
-        });
+        setColumns(candlesToColumns(candles));
         dataLen.value = candles.length;
         positioned.current = false;
+        unsubscribe = adapter.subscribe({
+          symbol,
+          interval,
+          onUpdate: (u) => {
+            if (!cancelled) applyUpdate(u);
+          },
+          onStatus: () => {
+            // TODO(stage-5): surface connection status chip.
+          },
+        });
       })
       .catch(() => {
         // TODO(stage-5): surface load errors via connection status.
@@ -134,8 +170,9 @@ export function Chart(props: ChartProps): ReactElement {
     return () => {
       cancelled = true;
       controller.abort();
+      unsubscribe?.();
     };
-  }, [adapter, symbol, interval, dataLen]);
+  }, [adapter, symbol, interval, dataLen, applyUpdate]);
 
   // Position at the live edge once data + size are known.
   useEffect(() => {

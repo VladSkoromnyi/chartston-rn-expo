@@ -59,14 +59,14 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vlad-skoromnyi/chartston.git"
+    "url": "git+https://github.com/VladSkoromnyi/chartston-rn-expo.git"
   },
-  "author": "Vlad Skoromnyi <vlad.skoromnyi.work@gmail.com> (https://github.com/vlad-skoromnyi)",
+  "author": "Vlad Skoromnyi <vlad.skoromnyi.work@gmail.com> (https://github.com/VladSkoromnyi)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/vlad-skoromnyi/chartston/issues"
+    "url": "https://github.com/VladSkoromnyi/chartston-rn-expo/issues"
   },
-  "homepage": "https://github.com/vlad-skoromnyi/chartston#readme",
+  "homepage": "https://github.com/VladSkoromnyi/chartston-rn-expo#readme",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },

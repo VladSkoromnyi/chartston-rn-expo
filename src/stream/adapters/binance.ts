@@ -11,6 +11,10 @@
  * Backfill↔live merge is handled by the consumer time-keying updates (a WS kline
  * whose open time matches the last history bar patches it; a newer one appends),
  * so this adapter just normalizes and emits.
+ *
+ * `fetch`/`WebSocket` are accessed via `globalThis` with local structural types, so
+ * this file doesn't depend on whether the consumer's TS lib resolves those globals
+ * to React Native, DOM, or Node types.
  */
 
 import type {
@@ -27,6 +31,24 @@ const BASE_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 /** No message for this long ⇒ treat the socket as dead and reconnect. */
 const STALENESS_MS = 30_000;
+
+type FetchLike = (
+  url: string,
+  init?: { signal?: unknown }
+) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>;
+
+interface SocketLike {
+  onopen: (() => void) | null;
+  onmessage: ((event: { data: unknown }) => void) | null;
+  onerror: (() => void) | null;
+  onclose: (() => void) | null;
+  close: () => void;
+}
+
+const platform = globalThis as unknown as {
+  fetch: FetchLike;
+  WebSocket: new (url: string) => SocketLike;
+};
 
 /** The `k` block of a Binance kline WS payload (RESEARCH §13.2). o/h/l/c/v are STRINGS. */
 export interface BinanceKline {
@@ -66,7 +88,7 @@ export class BinanceFeedAdapter implements MarketFeedAdapter {
       `&interval=${encodeURIComponent(req.interval)}&limit=${limit}`;
     if (req.endTime) url += `&endTime=${req.endTime}`;
 
-    const res = await fetch(url, { signal: req.signal });
+    const res = await platform.fetch(url, { signal: req.signal });
     if (!res.ok) {
       throw new Error(`Binance klines HTTP ${res.status}`);
     }
@@ -83,7 +105,7 @@ export class BinanceFeedAdapter implements MarketFeedAdapter {
 
   subscribe(req: SubscribeRequest): () => void {
     const stream = `${req.symbol.id.toLowerCase()}@kline_${req.interval}`;
-    let ws: WebSocket | null = null;
+    let ws: SocketLike | null = null;
     let disposed = false;
     let attempt = 0;
     let staleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -103,17 +125,18 @@ export class BinanceFeedAdapter implements MarketFeedAdapter {
     const connect = () => {
       if (disposed) return;
       req.onStatus?.(attempt === 0 ? 'connecting' : 'reconnecting');
-      ws = new WebSocket(`${WS_BASE}/ws/${stream}`);
+      const socket = new platform.WebSocket(`${WS_BASE}/ws/${stream}`);
+      ws = socket;
 
-      ws.onopen = () => {
+      socket.onopen = () => {
         attempt = 0;
         req.onStatus?.('open');
         armStale();
       };
-      ws.onmessage = (ev) => {
+      socket.onmessage = (event) => {
         armStale();
         try {
-          const msg = JSON.parse(String(ev.data)) as { k?: BinanceKline };
+          const msg = JSON.parse(String(event.data)) as { k?: BinanceKline };
           if (msg.k) {
             // Type is advisory — the consumer time-keys to decide patch vs append.
             req.onUpdate({
@@ -125,10 +148,10 @@ export class BinanceFeedAdapter implements MarketFeedAdapter {
           // ignore malformed frames
         }
       };
-      ws.onerror = () => {
+      socket.onerror = () => {
         req.onStatus?.('error');
       };
-      ws.onclose = () => {
+      socket.onclose = () => {
         clearStale();
         if (disposed) {
           req.onStatus?.('closed');

@@ -32,9 +32,11 @@ import {
   matchFont,
   vec,
 } from '@shopify/react-native-skia';
+import type { SkPath } from '@shopify/react-native-skia';
 import type { Candle, CandleUpdate, ChartProps } from '../types';
 import { DARK_THEME } from '../theme';
 import {
+  bollinger,
   candlesToColumns,
   ema,
   formatCompact,
@@ -47,6 +49,7 @@ import {
   priceToY,
   sma,
   visibleRange,
+  vwap,
   yToPrice,
 } from '../core';
 import type { CandleColumns } from '../core';
@@ -60,6 +63,9 @@ const PRICE_TICK_COUNT = 5;
 const TIME_LABEL_MIN_PX = 64;
 const OVERLAY_SMA_COLOR = '#f0b90b';
 const OVERLAY_EMA_COLOR = '#3b82f6';
+const OVERLAY_BOLL_BAND_COLOR = '#787b86'; // upper/lower — muted grey
+const OVERLAY_BOLL_MID_COLOR = '#b2b5be'; // middle — lighter, thin
+const OVERLAY_VWAP_COLOR = '#e040fb'; // magenta/purple
 const LEGEND_STEP = 70;
 
 const FONT_FAMILY = Platform.select({
@@ -232,7 +238,18 @@ export function Chart(props: ChartProps): ReactElement {
   // Overlay studies — computed on data change only, not per pan frame.
   const studies = useMemo(() => {
     if (!columns || columns.closes.length === 0) return null;
-    return { sma20: sma(columns.closes, 20), ema50: ema(columns.closes, 50) };
+    return {
+      sma20: sma(columns.closes, 20),
+      ema50: ema(columns.closes, 50),
+      bollinger: bollinger(columns.closes, 20, 2),
+      vwap: vwap(
+        columns.highs,
+        columns.lows,
+        columns.closes,
+        columns.volumes,
+        columns.times
+      ),
+    };
   }, [columns]);
 
   const frame = useMemo(() => {
@@ -276,38 +293,38 @@ export function Chart(props: ChartProps): ReactElement {
       plotHeight,
       false
     );
-    const overlays = studies
-      ? [
-          {
-            path: buildLinePath(
-              studies.sma20,
-              start,
-              end,
-              view.offset,
-              view.barSpacing,
-              range.min,
-              range.max,
-              plotHeight,
-              false
-            ),
-            color: OVERLAY_SMA_COLOR,
-          },
-          {
-            path: buildLinePath(
-              studies.ema50,
-              start,
-              end,
-              view.offset,
-              view.barSpacing,
-              range.min,
-              range.max,
-              plotHeight,
-              false
-            ),
-            color: OVERLAY_EMA_COLOR,
-          },
-        ]
-      : [];
+    // Helper: an overlay line series mapped against the price-pane range.
+    const overlayLine = (
+      values: number[],
+      color: string,
+      strokeWidth = 1.5
+    ): { path: SkPath; color: string; strokeWidth: number } => ({
+      path: buildLinePath(
+        values,
+        start,
+        end,
+        view.offset,
+        view.barSpacing,
+        range.min,
+        range.max,
+        plotHeight,
+        false
+      ),
+      color,
+      strokeWidth,
+    });
+    const overlays: { path: SkPath; color: string; strokeWidth: number }[] =
+      studies
+        ? [
+            // Bollinger first so the SMA/EMA/VWAP lines sit on top of the band.
+            overlayLine(studies.bollinger.upper, OVERLAY_BOLL_BAND_COLOR, 1),
+            overlayLine(studies.bollinger.lower, OVERLAY_BOLL_BAND_COLOR, 1),
+            overlayLine(studies.bollinger.middle, OVERLAY_BOLL_MID_COLOR, 1),
+            overlayLine(studies.sma20, OVERLAY_SMA_COLOR),
+            overlayLine(studies.ema50, OVERLAY_EMA_COLOR),
+            overlayLine(studies.vwap, OVERLAY_VWAP_COLOR),
+          ]
+        : [];
     const priceTicks = niceTicks(range.min, range.max, PRICE_TICK_COUNT).map(
       (value) => ({
         label: formatPrice(value, symbol.pricePrecision),
@@ -506,7 +523,7 @@ export function Chart(props: ChartProps): ReactElement {
                     path={ov.path}
                     color={ov.color}
                     style="stroke"
-                    strokeWidth={1.5}
+                    strokeWidth={ov.strokeWidth}
                   />
                 ))}
               </Group>

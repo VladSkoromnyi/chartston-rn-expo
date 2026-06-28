@@ -25,6 +25,7 @@ export interface CandleColumns {
   highs: number[];
   lows: number[];
   closes: number[];
+  volumes: number[];
 }
 
 export interface CandleGeometry {

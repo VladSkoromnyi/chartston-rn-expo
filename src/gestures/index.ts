@@ -1,10 +1,14 @@
 /**
- * `gestures/` — pan / pinch / momentum as UI-thread worklets (PLAN §5.1, §5.4).
+ * `gestures/` — pan / pinch / momentum + long-press crosshair, as UI-thread
+ * worklets (PLAN §5.1, §5.4).
  *
- * Gestures mutate the shared `offset` (pan) and `barSpacing` (pinch, focal-anchored)
- * directly on the UI thread; the chart's derived candle geometry reacts without
- * touching the JS thread. `onSettle` runs on JS when a gesture finishes (incl. after
- * momentum) to recompute autoscale + axis ticks.
+ * - quick drag        → pan (`offset`)
+ * - pinch             → zoom (`barSpacing`, focal-anchored)
+ * - flick             → momentum (`withDecay`)
+ * - long-press + drag → crosshair (writes `crosshairX`/`crosshairY`; -1 = inactive)
+ *
+ * The crosshair pan only activates after a long press, so a normal drag still
+ * pans; `Exclusive` gives the crosshair priority once the press is held.
  */
 
 import { useMemo } from 'react';
@@ -17,13 +21,16 @@ const MIN_BAR_SPACING = 2;
 const MAX_BAR_SPACING = 40;
 /** Keep at least this fraction of a screen of candles in view when panning to the edges. */
 const KEEP_VISIBLE_FRACTION = 0.25;
+const CROSSHAIR_LONG_PRESS_MS = 250;
 
 export interface UseChartGesturesParams {
   offset: SharedValue<number>;
   barSpacing: SharedValue<number>;
   dataLen: SharedValue<number>;
   plotWidth: number;
-  /** Runs on JS when a gesture settles — recompute autoscale + axes. */
+  crosshairX: SharedValue<number>;
+  crosshairY: SharedValue<number>;
+  /** Runs on JS when a pan/pinch settles — recompute autoscale + axes. */
   onSettle: () => void;
 }
 
@@ -32,6 +39,8 @@ export function useChartGestures({
   barSpacing,
   dataLen,
   plotWidth,
+  crosshairX,
+  crosshairY,
   onSettle,
 }: UseChartGesturesParams): ComposedGesture {
   return useMemo(() => {
@@ -77,7 +86,6 @@ export function useChartGestures({
         if (next < MIN_BAR_SPACING) next = MIN_BAR_SPACING;
         else if (next > MAX_BAR_SPACING) next = MAX_BAR_SPACING;
         barSpacing.value = next;
-        // Keep the focal bar pinned under the fingers.
         const visible = plotWidth / next;
         const maxOffset = Math.max(
           0,
@@ -94,6 +102,32 @@ export function useChartGestures({
         runOnJS(onSettle)();
       });
 
-    return Gesture.Simultaneous(pan, pinch);
-  }, [offset, barSpacing, dataLen, plotWidth, onSettle]);
+    const crosshair = Gesture.Pan()
+      .activateAfterLongPress(CROSSHAIR_LONG_PRESS_MS)
+      .onStart((e) => {
+        'worklet';
+        crosshairX.value = e.x;
+        crosshairY.value = e.y;
+      })
+      .onChange((e) => {
+        'worklet';
+        crosshairX.value = e.x;
+        crosshairY.value = e.y;
+      })
+      .onFinalize(() => {
+        'worklet';
+        crosshairX.value = -1;
+        crosshairY.value = -1;
+      });
+
+    return Gesture.Simultaneous(pinch, Gesture.Exclusive(crosshair, pan));
+  }, [
+    offset,
+    barSpacing,
+    dataLen,
+    plotWidth,
+    crosshairX,
+    crosshairY,
+    onSettle,
+  ]);
 }

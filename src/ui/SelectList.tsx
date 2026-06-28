@@ -35,12 +35,18 @@ export function SelectList<T>(
     onSelect,
     searchable,
     selectedId,
+    selectedIds,
+    closeOnSelect = true,
     title,
     snapPoints,
     renderRow,
   } = props;
   const theme = props.theme ?? DARK_THEME;
   const [query, setQuery] = useState('');
+  const multiSelected = useMemo(
+    () => new Set(selectedIds ?? []),
+    [selectedIds]
+  );
 
   const data = useMemo(() => {
     if (!searchable || !query) return options;
@@ -62,9 +68,9 @@ export function SelectList<T>(
   const handleSelect = useCallback(
     (option: SelectOption<T>) => {
       onSelect(option);
-      sheetRef.current?.dismiss();
+      if (closeOnSelect) sheetRef.current?.dismiss();
     },
-    [onSelect, sheetRef]
+    [onSelect, sheetRef, closeOnSelect]
   );
 
   return (
@@ -113,26 +119,43 @@ export function SelectList<T>(
               </Pressable>
             );
           }
-          const selected = item.id === selectedId;
+          const checked = multiSelected.has(item.id);
+          const selected = item.id === selectedId || checked;
           return (
             <Pressable
               style={styles.row}
               disabled={item.disabled}
               onPress={() => handleSelect(item)}
             >
-              <Text
-                style={[
-                  styles.rowLabel,
-                  {
-                    color: selected ? theme.upColor : theme.crosshairLabelText,
-                  },
-                ]}
-              >
-                {item.label}
-              </Text>
-              {item.sublabel ? (
-                <Text style={[styles.rowSub, { color: theme.axisTextColor }]}>
-                  {item.sublabel}
+              <View style={styles.rowMain}>
+                <Text
+                  style={[
+                    styles.rowLabel,
+                    {
+                      color: selected
+                        ? theme.upColor
+                        : theme.crosshairLabelText,
+                    },
+                  ]}
+                >
+                  {item.label}
+                </Text>
+                {item.sublabel ? (
+                  <Text style={[styles.rowSub, { color: theme.axisTextColor }]}>
+                    {item.sublabel}
+                  </Text>
+                ) : null}
+              </View>
+              {selectedIds ? (
+                <Text
+                  style={[
+                    styles.check,
+                    {
+                      color: checked ? theme.upColor : theme.axisLineColor,
+                    },
+                  ]}
+                >
+                  {checked ? '✓' : '○'}
                 </Text>
               ) : null}
             </Pressable>
@@ -167,10 +190,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
+  rowMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
   rowLabel: {
     fontSize: 16,
   },
   rowSub: {
     fontSize: 13,
+  },
+  check: {
+    fontSize: 18,
+    marginLeft: 12,
+    width: 20,
+    textAlign: 'center',
   },
 });

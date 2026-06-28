@@ -77,7 +77,7 @@
     "@gorhom/bottom-sheet": "5.2.14",
     "@react-native/babel-preset": "0.85.0",
     "@react-native/eslint-config": "0.85.0",
-    "@shopify/react-native-skia": "2.6.8",
+    "@shopify/react-native-skia": "2.6.2",
     "@types/react": "^19.2.0",
     "del-cli": "^7.0.0",
     "eslint": "^9.39.4",
@@ -88,20 +88,20 @@
     "react": "19.2.0",
     "react-native": "0.83.6",
     "react-native-builder-bob": "^0.43.0",
-    "react-native-gesture-handler": "3.0.2",
-    "react-native-reanimated": "4.5.0",
-    "react-native-worklets": "0.10.0",
+    "react-native-gesture-handler": "2.31.1",
+    "react-native-reanimated": "4.3.1",
+    "react-native-worklets": "0.8.3",
     "turbo": "^2.9.16",
     "typescript": "^6.0.3"
   },
   "peerDependencies": {
+    "@gorhom/bottom-sheet": ">=5.0.0",
+    "@shopify/react-native-skia": ">=2.0.0",
     "react": ">=19.0.0",
     "react-native": ">=0.79.0",
-    "@shopify/react-native-skia": ">=2.0.0",
-    "react-native-reanimated": ">=4.0.0",
-    "react-native-worklets": ">=0.4.0",
     "react-native-gesture-handler": ">=2.31.0",
-    "@gorhom/bottom-sheet": ">=5.0.0"
+    "react-native-reanimated": ">=4.0.0",
+    "react-native-worklets": ">=0.4.0"
   },
   "peerDependenciesMeta": {
     "@gorhom/bottom-sheet": {

@@ -36,7 +36,8 @@
     "clean": "del-cli lib",
     "prepare": "bob build",
     "typecheck": "tsc",
-    "lint": "eslint \"**/*.{js,ts,tsx}\""
+    "lint": "eslint \"**/*.{js,ts,tsx}\"",
+    "test": "vitest run"
   },
   "keywords": [
     "react-native",
@@ -92,7 +93,8 @@
     "react-native-reanimated": "4.3.1",
     "react-native-worklets": "0.8.3",
     "turbo": "^2.9.16",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
   },
   "peerDependencies": {
     "@gorhom/bottom-sheet": ">=5.0.0",

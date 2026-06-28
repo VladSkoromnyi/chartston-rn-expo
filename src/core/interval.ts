@@ -118,9 +118,9 @@ export function floorToInterval(timeMs: Millis, interval: Interval): Millis {
     return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0);
   }
   if (interval === '1w') {
-    // Shift epoch so weeks start on Monday, floor, shift back. (Epoch 0 = Thursday.)
-    const MONDAY_OFFSET = 4 * DAY; // Thu -> Mon
-    return Math.floor((timeMs + MONDAY_OFFSET) / WEEK) * WEEK - MONDAY_OFFSET;
+    // Epoch 0 is a Thursday; the first Monday is +4 days. Align weeks to Monday 00:00 UTC.
+    const MONDAY_OFFSET = 4 * DAY;
+    return Math.floor((timeMs - MONDAY_OFFSET) / WEEK) * WEEK + MONDAY_OFFSET;
   }
   const ms = INTERVAL_MS[interval];
   return Math.floor(timeMs / ms) * ms;

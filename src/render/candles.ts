@@ -17,16 +17,7 @@
 
 import { Skia } from '@shopify/react-native-skia';
 import type { SkPath } from '@shopify/react-native-skia';
-
-/** Plain column arrays for a candle series. */
-export interface CandleColumns {
-  times: number[];
-  opens: number[];
-  highs: number[];
-  lows: number[];
-  closes: number[];
-  volumes: number[];
-}
+import type { CandleColumns } from '../core/columns';
 
 export interface CandleGeometry {
   upBodies: SkPath;

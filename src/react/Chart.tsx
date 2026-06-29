@@ -13,7 +13,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text as RNText,
+  View,
+} from 'react-native';
 import type { LayoutChangeEvent } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
 import {
@@ -40,6 +47,7 @@ import type {
   ChartMarker,
   ChartProps,
   ChartStudiesConfig,
+  ConnectionStatus,
   Drawing,
   PaneStudyId,
   PriceLine,
@@ -123,6 +131,16 @@ const EMPTY_PRICE_LINES: PriceLine[] = [];
 const EMPTY_MARKERS: ChartMarker[] = [];
 const EMPTY_DRAWINGS: Drawing[] = [];
 const DRAWING_DEFAULT_COLOR = '#f0b90b';
+
+// Connection-status chip labels (Stage 8 "states"). The adapter emits the status.
+const STATUS_LABEL: Record<ConnectionStatus, string> = {
+  idle: 'Idle',
+  connecting: 'Connecting…',
+  open: 'Live',
+  reconnecting: 'Reconnecting…',
+  closed: 'Offline',
+  error: 'Error',
+};
 
 const DEFAULT_ACTIVE_STUDIES: ChartStudiesConfig = {
   overlays: ['sma', 'ema', 'bollinger', 'vwap', 'volume'],
@@ -382,6 +400,9 @@ export function Chart(props: ChartProps): ReactElement {
   plotWidthRef.current = plotWidth;
 
   const [columns, setColumns] = useState<CandleColumns | null>(null);
+  const [status, setStatus] = useState<ConnectionStatus>('idle');
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Shared viewport + crosshair (mutated by gestures on the UI thread).
   const offset = useSharedValue(0);
@@ -442,6 +463,8 @@ export function Chart(props: ChartProps): ReactElement {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     const controller = new AbortController();
+    setLoadError(false);
+    setStatus('connecting');
     adapter
       .fetchHistory({ symbol, interval, signal: controller.signal })
       .then((candles) => {
@@ -457,20 +480,23 @@ export function Chart(props: ChartProps): ReactElement {
           onUpdate: (u) => {
             if (!cancelled) applyUpdate(u);
           },
-          onStatus: () => {
-            // TODO(stage-5): surface connection status chip.
+          onStatus: (s) => {
+            if (!cancelled) setStatus(s);
           },
         });
       })
       .catch(() => {
-        // TODO(stage-5): surface load errors via connection status.
+        if (!cancelled) {
+          setLoadError(true);
+          setStatus('error');
+        }
       });
     return () => {
       cancelled = true;
       controller.abort();
       unsubscribe?.();
     };
-  }, [adapter, symbol, interval, dataLen, applyUpdate]);
+  }, [adapter, symbol, interval, dataLen, applyUpdate, reloadKey]);
 
   // Position at the live edge once data + size are known.
   useEffect(() => {
@@ -939,6 +965,15 @@ export function Chart(props: ChartProps): ReactElement {
     : [];
 
   const lastY = frame ? frame.lastY : Number.NEGATIVE_INFINITY;
+  const statusLabel = STATUS_LABEL[status];
+  const statusDotColor =
+    status === 'open'
+      ? theme.upColor
+      : status === 'connecting' || status === 'reconnecting'
+        ? '#f0b90b'
+        : status === 'error' || status === 'closed'
+          ? theme.downColor
+          : theme.axisTextColor;
 
   return (
     <GestureDetector gesture={gesture}>
@@ -1446,6 +1481,59 @@ export function Chart(props: ChartProps): ReactElement {
               ))}
           </Canvas>
         )}
+
+        {/* Connection-status chip (sits just left of the price axis). */}
+        {columns && columns.opens.length > 0 && (
+          <View
+            style={[styles.statusChip, { right: PRICE_AXIS_WIDTH + 8 }]}
+            pointerEvents="none"
+          >
+            <View
+              style={[styles.statusDot, { backgroundColor: statusDotColor }]}
+            />
+            <RNText style={[styles.statusText, { color: theme.axisTextColor }]}>
+              {statusLabel}
+            </RNText>
+          </View>
+        )}
+
+        {/* States: error (with retry) / loading / empty. */}
+        {loadError ? (
+          <View style={styles.overlay} pointerEvents="box-none">
+            <RNText
+              style={[styles.overlayText, { color: theme.axisTextColor }]}
+            >
+              Couldn&apos;t load {symbol.displayName}.
+            </RNText>
+            <Pressable
+              onPress={() => setReloadKey((k) => k + 1)}
+              style={[styles.retryBtn, { borderColor: theme.axisLineColor }]}
+            >
+              <RNText
+                style={[styles.retryText, { color: theme.crosshairLabelText }]}
+              >
+                Retry
+              </RNText>
+            </Pressable>
+          </View>
+        ) : !columns ? (
+          <View style={styles.overlay} pointerEvents="none">
+            <ActivityIndicator color={theme.axisTextColor} />
+            <RNText
+              style={[styles.overlayText, { color: theme.axisTextColor }]}
+            >
+              Loading…
+            </RNText>
+          </View>
+        ) : columns.opens.length === 0 ? (
+          <View style={styles.overlay} pointerEvents="none">
+            <RNText
+              style={[styles.overlayText, { color: theme.axisTextColor }]}
+            >
+              No data
+            </RNText>
+          </View>
+        ) : null}
       </View>
     </GestureDetector>
   );
@@ -1453,4 +1541,27 @@ export function Chart(props: ChartProps): ReactElement {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  overlayText: { fontSize: 14, fontWeight: '500' },
+  retryBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  retryText: { fontSize: 13, fontWeight: '600' },
+  statusChip: {
+    position: 'absolute',
+    top: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusText: { fontSize: 11, fontWeight: '600' },
 });

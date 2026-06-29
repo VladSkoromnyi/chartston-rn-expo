@@ -1,7 +1,7 @@
 /**
  * Chartston public type surface — the single source of truth (PLAN.md §7).
  *
- * Derived from how real exchanges and TradingView Lightweight Charts shape data
+ * Derived from how real exchanges and common web charting engines shape data
  * (see RESEARCH.md). A consumer can wire Chartston to *any* feed by implementing
  * one small adapter interface ({@link MarketFeedAdapter}) and, optionally, custom
  * studies ({@link StudyDescriptor}).
@@ -218,7 +218,7 @@ export interface StudyDescriptor<S extends StudyState = StudyState> {
 
 /**
  * Built-in overlays drawn on the price pane. `volume` is a faint histogram
- * anchored to the bottom of the price pane, behind the candles (TradingView-style);
+ * anchored to the bottom of the price pane, behind the candles (exchange-style);
  * the others are line series.
  */
 export type OverlayStudyId = 'sma' | 'ema' | 'bollinger' | 'vwap' | 'volume';

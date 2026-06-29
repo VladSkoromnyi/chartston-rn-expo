@@ -103,7 +103,7 @@ const SUBPANE_HEIGHT = 96;
 const MIN_PRICE_PANE_HEIGHT = 120;
 const PANE_PADDING_Y = 6; // inset so series don't touch the separators
 
-// Volume overlay (TradingView-style): a faint histogram anchored to the bottom of
+// Volume overlay (exchange-style): a faint histogram anchored to the bottom of
 // the price pane and drawn behind the candles, capped at a fraction of the pane.
 const VOLUME_OVERLAY_FRACTION = 0.22;
 const VOLUME_OVERLAY_ALPHA = '4d'; // ~30% — subtle so the candles stay legible
@@ -121,7 +121,7 @@ const RSI_GUIDE_UPPER = 70;
 const RSI_GUIDE_LOWER = 30;
 
 // Non-candlestick series (Stage 8).
-const SERIES_LINE_COLOR = '#2962ff'; // line/area stroke — TradingView blue
+const SERIES_LINE_COLOR = '#2962ff'; // line/area stroke — a standard chart blue
 const SERIES_AREA_ALPHA = '22'; // ~13% fill under the line/baseline
 
 // Markers / price lines (Stage 8).
@@ -686,7 +686,7 @@ export function Chart(props: ChartProps): ReactElement {
         overlays.push(overlayLine(studies.vwap, OVERLAY_VWAP_COLOR));
     }
     // Volume overlay — a faint bottom-anchored histogram behind the candles
-    // (TradingView-style), capped at VOLUME_OVERLAY_FRACTION of the price pane.
+    // (exchange-style), capped at VOLUME_OVERLAY_FRACTION of the price pane.
     let volume: { upBars: SkPath; downBars: SkPath } | null = null;
     if (studies && ov.has('volume')) {
       let maxV = 0;

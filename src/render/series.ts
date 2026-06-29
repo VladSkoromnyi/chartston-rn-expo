@@ -104,7 +104,7 @@ export function buildAreaSeries(
 /**
  * Baseline series: the close polyline plus a fill between the line and a baseline
  * price. The fill/line are returned whole; the caller clips above/below `baselineY`
- * to colour each side (TradingView baseline look).
+ * to colour each side (two-tone baseline look).
  */
 export function buildBaselineSeries(
   closes: number[],

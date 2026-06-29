@@ -1,6 +1,6 @@
 /**
  * Default themes (RESEARCH §1 color model). Up/down/border/wick are independent.
- * Palette mirrors TradingView's dark/light defaults.
+ * Palette mirrors common exchange dark/light defaults.
  */
 
 import type { ChartTheme } from './types';

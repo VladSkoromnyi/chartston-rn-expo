@@ -67,7 +67,7 @@ expected · severity**. Grouped:
 | **Live streaming** | active-bar `patch` mutates last candle only; new-bar `append` advances pinned view; **no whole-series flicker**; volume bar recolors with direction. |
 | **Symbol/interval switch** | switch feels instant; viewport re-fits; no leaked socket (assert via status chip); stale response for old symbol discarded. |
 | **Gestures @ 10k** | pan/pinch/momentum at 60fps; pinch anchors on focal bar; crosshair long-press snaps to index; OHLCV legend correct. |
-| **Indicators** | RSI/MACD/SMA/EMA/Bollinger/VWAP/ATR/Stochastic values match a reference (TradingView screenshot or fixture) within ε; panes recompute live; add/remove works. |
+| **Indicators** | RSI/MACD/SMA/EMA/Bollinger/VWAP/ATR/Stochastic values match a reference (screenshot or fixture) within ε; panes recompute live; add/remove works. |
 | **Reconnect** | forced disconnect → reconnects w/ backoff; re-backfills missed bars; no gap/dup at the seam. |
 | **States** | empty / loading / error / offline render correctly. |
 

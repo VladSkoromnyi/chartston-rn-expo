@@ -6,7 +6,7 @@
 <!-- [![npm](https://img.shields.io/npm/v/chartston.svg)](https://www.npmjs.com/package/chartston) -->
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
-Chartston draws interactive financial charts on the GPU and keeps everything that moves **off the JS thread** (Skia rendering + Reanimated worklet gestures). It targets the **New Architecture** (Expo SDK 56+ / RN 0.79+) and ships TradingView-style candlesticks, overlays, oscillator panes, a long-press crosshair, live streaming, theming, and basic drawing tools.
+Chartston draws interactive financial charts on the GPU and keeps everything that moves **off the JS thread** (Skia rendering + Reanimated worklet gestures). It targets the **New Architecture** (Expo SDK 56+ / RN 0.79+) and ships exchange-style candlesticks, overlays, oscillator panes, a long-press crosshair, live streaming, theming, and basic drawing tools.
 
 > **Status: pre-release (`0.x`), active development.** The public API is close to stable but may still shift before `1.0`.
 

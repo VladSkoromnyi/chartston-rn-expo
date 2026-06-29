@@ -303,6 +303,28 @@ export interface SelectListProps<T> {
 
 export type ChartType = 'candlestick' | 'line' | 'area' | 'bar' | 'baseline';
 
+/** A horizontal price line drawn across the price pane with a right-axis tag. */
+export interface PriceLine {
+  price: number;
+  color?: string;
+  /** Right-axis tag text; defaults to the formatted price. */
+  title?: string;
+  /** `dashed` is reserved; currently rendered solid. */
+  lineStyle?: 'solid' | 'dashed';
+  lineWidth?: number;
+}
+
+/** A marker anchored to a bar (matched by open time), drawn above/below the bar. */
+export interface ChartMarker {
+  /** Bar open time (ms); snapped to the nearest visible bar. */
+  time: number;
+  position?: 'aboveBar' | 'belowBar' | 'inBar';
+  shape?: 'circle' | 'arrowUp' | 'arrowDown' | 'square';
+  color?: string;
+  /** Optional text drawn beside the marker. */
+  text?: string;
+}
+
 export interface ChartProps {
   symbol: SymbolInfo;
   interval: Interval;
@@ -313,6 +335,10 @@ export interface ChartProps {
   activeStudies?: ChartStudiesConfig;
   theme?: ChartTheme;
   chartType?: ChartType;
+  /** Horizontal price lines (alerts/entries) drawn across the price pane. */
+  priceLines?: PriceLine[];
+  /** Markers anchored to bars, matched by open time. */
+  markers?: ChartMarker[];
   style?: StyleProp<ViewStyle>;
   onCrosshairMove?: (bar: Candle | null, index: number) => void;
   onViewportChange?: (v: Viewport) => void;

@@ -216,11 +216,15 @@ export interface StudyDescriptor<S extends StudyState = StudyState> {
 // above is the extensibility seam for custom studies; this is the curated set.)
 // ----------------------------------------------------------------------------
 
-/** Built-in overlays drawn on the price pane. */
-export type OverlayStudyId = 'sma' | 'ema' | 'bollinger' | 'vwap';
+/**
+ * Built-in overlays drawn on the price pane. `volume` is a faint histogram
+ * anchored to the bottom of the price pane, behind the candles (TradingView-style);
+ * the others are line series.
+ */
+export type OverlayStudyId = 'sma' | 'ema' | 'bollinger' | 'vwap' | 'volume';
 
 /** Built-in studies drawn in their own stacked sub-pane below the price pane. */
-export type PaneStudyId = 'volume' | 'rsi' | 'macd';
+export type PaneStudyId = 'rsi' | 'macd';
 
 export type BuiltinStudyId = OverlayStudyId | PaneStudyId;
 

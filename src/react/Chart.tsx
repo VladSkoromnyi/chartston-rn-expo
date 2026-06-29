@@ -86,7 +86,15 @@ const LEGEND_STEP = 70;
 const SUBPANE_HEIGHT = 96;
 const MIN_PRICE_PANE_HEIGHT = 120;
 const PANE_PADDING_Y = 6; // inset so series don't touch the separators
-const SUBPANE_LABEL_INSET = 10;
+
+// Volume overlay (TradingView-style): a faint histogram anchored to the bottom of
+// the price pane and drawn behind the candles, capped at a fraction of the pane.
+const VOLUME_OVERLAY_FRACTION = 0.22;
+const VOLUME_OVERLAY_ALPHA = '4d'; // ~30% — subtle so the candles stay legible
+
+// Hide an axis price label that lands within this many px of the live-price tag,
+// so the tag (drawn on top) reads cleanly against the axis.
+const PRICE_LABEL_HIDE_GAP = 10;
 
 const MACD_COLOR = '#2962ff'; // macd line — blue
 const MACD_SIGNAL_COLOR = '#ff6d00'; // signal line — orange
@@ -97,8 +105,8 @@ const RSI_GUIDE_UPPER = 70;
 const RSI_GUIDE_LOWER = 30;
 
 const DEFAULT_ACTIVE_STUDIES: ChartStudiesConfig = {
-  overlays: ['sma', 'ema', 'bollinger', 'vwap'],
-  panes: ['volume', 'rsi', 'macd'],
+  overlays: ['sma', 'ema', 'bollinger', 'vwap', 'volume'],
+  panes: ['rsi', 'macd'],
 };
 
 type SubPaneId = PaneStudyId;
@@ -109,6 +117,11 @@ const FONT_FAMILY = Platform.select({
 }) as string;
 
 const noop = () => {};
+
+/** Append an 8-bit alpha (e.g. '4d') to a #RRGGBB hex; pass other colors through. */
+function withAlpha(color: string, alpha: string): string {
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color + alpha : color;
+}
 
 interface OHLCV {
   open: number;
@@ -167,7 +180,6 @@ type StudiesBundle = {
 function buildSubPane(
   id: SubPaneId,
   s: StudiesBundle,
-  columns: CandleColumns,
   start: number,
   end: number,
   offset: number,
@@ -182,34 +194,7 @@ function buildSubPane(
   const labels: PaneLabel[] = [];
   let title = '';
 
-  if (id === 'volume') {
-    title = 'Vol';
-    let maxV = 0;
-    for (let i = start; i <= end; i++) {
-      const v = columns.volumes[i]!;
-      if (v > maxV) maxV = v;
-    }
-    const up: boolean[] = [];
-    for (let i = start; i <= end; i++) {
-      up[i] = columns.closes[i]! >= columns.opens[i]!;
-    }
-    const { upBars, downBars } = buildVolumeHistogram(
-      columns.volumes,
-      up,
-      start,
-      end,
-      offset,
-      barSpacing,
-      maxV,
-      inner
-    );
-    // Up/down volume bars (muted so the price pane stays the focus).
-    histograms.push(
-      { path: upBars, color: '#26a69a88' },
-      { path: downBars, color: '#ef535088' }
-    );
-    labels.push({ text: formatCompact(maxV), y: SUBPANE_LABEL_INSET });
-  } else if (id === 'rsi') {
+  if (id === 'rsi') {
     title = 'RSI 14';
     // Fixed 0..100 axis.
     const valueToY = (v: number): number => inner - (v / 100) * inner;
@@ -566,6 +551,30 @@ export function Chart(props: ChartProps): ReactElement {
       if (ov.has('vwap'))
         overlays.push(overlayLine(studies.vwap, OVERLAY_VWAP_COLOR));
     }
+    // Volume overlay — a faint bottom-anchored histogram behind the candles
+    // (TradingView-style), capped at VOLUME_OVERLAY_FRACTION of the price pane.
+    let volume: { upBars: SkPath; downBars: SkPath } | null = null;
+    if (studies && ov.has('volume')) {
+      let maxV = 0;
+      const up: boolean[] = [];
+      for (let i = start; i <= end; i++) {
+        const v = columns.volumes[i]!;
+        if (v > maxV) maxV = v;
+        up[i] = columns.closes[i]! >= columns.opens[i]!;
+      }
+      if (maxV > 0) {
+        volume = buildVolumeHistogram(
+          columns.volumes,
+          up,
+          start,
+          end,
+          view.offset,
+          view.barSpacing,
+          maxV / VOLUME_OVERLAY_FRACTION,
+          pricePaneHeight
+        );
+      }
+    }
     const priceTicks = niceTicks(range.min, range.max, PRICE_TICK_COUNT)
       .map((value) => ({
         label: formatPrice(value, symbol.pricePrecision),
@@ -592,7 +601,6 @@ export function Chart(props: ChartProps): ReactElement {
           return buildSubPane(
             id,
             studies,
-            columns,
             start,
             end,
             view.offset,
@@ -616,6 +624,7 @@ export function Chart(props: ChartProps): ReactElement {
     return {
       geometry,
       overlays,
+      volume,
       priceTicks,
       timeTicks,
       range,
@@ -723,6 +732,8 @@ export function Chart(props: ChartProps): ReactElement {
       ]
     : [];
 
+  const lastY = frame ? frame.lastY : Number.NEGATIVE_INFINITY;
+
   return (
     <GestureDetector gesture={gesture}>
       <View style={[styles.fill, style]} onLayout={onLayout}>
@@ -779,6 +790,19 @@ export function Chart(props: ChartProps): ReactElement {
                   Math.max(0, frame.pricePaneHeight)
                 )}
               >
+                {/* Volume overlay — behind the candles, anchored to the pane bottom. */}
+                {frame.volume && (
+                  <>
+                    <Path
+                      path={frame.volume.upBars}
+                      color={withAlpha(theme.upColor, VOLUME_OVERLAY_ALPHA)}
+                    />
+                    <Path
+                      path={frame.volume.downBars}
+                      color={withAlpha(theme.downColor, VOLUME_OVERLAY_ALPHA)}
+                    />
+                  </>
+                )}
                 <Path
                   path={frame.geometry.upWicks}
                   color={theme.wickUpColor}
@@ -885,6 +909,34 @@ export function Chart(props: ChartProps): ReactElement {
               </Group>
             ))}
 
+            {/* Axis labels — drawn before the live-price tag + crosshair so those
+                dynamic tags paint on top (crosshair top-most). The price label
+                nearest the live-price tag is hidden so the tag reads cleanly. */}
+            {font &&
+              frame?.priceTicks
+                .filter((t) => Math.abs(t.y - lastY) >= PRICE_LABEL_HIDE_GAP)
+                .map((t, i) => (
+                  <Text
+                    key={`pl-${i}`}
+                    x={plotWidth + 4}
+                    y={t.y + 4}
+                    text={t.label}
+                    font={font}
+                    color={theme.axisTextColor}
+                  />
+                ))}
+            {font &&
+              frame?.timeTicks.map((t, i) => (
+                <Text
+                  key={`tl-${i}`}
+                  x={t.x - 16}
+                  y={plotHeight + 16}
+                  text={t.label}
+                  font={font}
+                  color={theme.axisTextColor}
+                />
+              ))}
+
             {/* Last-price line + tag */}
             {frame && (
               <Group>
@@ -975,30 +1027,6 @@ export function Chart(props: ChartProps): ReactElement {
                 )}
               </Group>
             )}
-
-            {/* Axis labels */}
-            {font &&
-              frame?.priceTicks.map((t, i) => (
-                <Text
-                  key={`pl-${i}`}
-                  x={plotWidth + 4}
-                  y={t.y + 4}
-                  text={t.label}
-                  font={font}
-                  color={theme.axisTextColor}
-                />
-              ))}
-            {font &&
-              frame?.timeTicks.map((t, i) => (
-                <Text
-                  key={`tl-${i}`}
-                  x={t.x - 16}
-                  y={plotHeight + 16}
-                  text={t.label}
-                  font={font}
-                  color={theme.axisTextColor}
-                />
-              ))}
 
             {/* OHLCV legend (top-left) */}
             {font &&

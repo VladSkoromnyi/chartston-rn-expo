@@ -66,9 +66,9 @@ const CATALOGUE: StudyMeta[] = [
   },
   {
     id: 'volume',
-    kind: 'pane',
+    kind: 'overlay',
     label: 'Volume',
-    sublabel: 'Sub-pane histogram',
+    sublabel: 'Histogram behind candles',
   },
   {
     id: 'rsi',

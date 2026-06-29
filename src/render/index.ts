@@ -9,4 +9,3 @@ export * from './candles';
 export * from './lines';
 export * from './histogram';
 export * from './series';
-export * from './crosshair';

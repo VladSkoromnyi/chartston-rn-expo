@@ -15,29 +15,20 @@
   "files": [
     "src",
     "lib",
-    "android",
-    "ios",
-    "cpp",
-    "*.podspec",
-    "react-native.config.js",
-    "!ios/build",
-    "!android/build",
-    "!android/gradle",
-    "!android/gradlew",
-    "!android/gradlew.bat",
-    "!android/local.properties",
     "!**/__tests__",
     "!**/__fixtures__",
     "!**/__mocks__",
     "!**/.*"
   ],
   "scripts": {
-    "example": "yarn workspace chartston-example",
     "clean": "del-cli lib",
     "prepare": "bob build",
-    "typecheck": "tsc",
-    "lint": "eslint \"**/*.{js,ts,tsx}\"",
-    "test": "vitest run"
+    "typecheck": "tsc -p tsconfig.build.json",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "bob build && changeset publish"
   },
   "keywords": [
     "react-native",
@@ -72,6 +63,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "@eslint/compat": "^2.1.0",
     "@eslint/eslintrc": "^3.3.5",
     "@eslint/js": "^10.0.1",
@@ -92,7 +84,6 @@
     "react-native-gesture-handler": "2.31.1",
     "react-native-reanimated": "4.3.1",
     "react-native-worklets": "0.8.3",
-    "turbo": "^2.9.16",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   },
@@ -110,9 +101,6 @@
       "optional": true
     }
   },
-  "workspaces": [
-    "example"
-  ],
   "packageManager": "yarn@4.11.0",
   "react-native-builder-bob": {
     "source": "src",

@@ -325,6 +325,17 @@ export interface ChartMarker {
   text?: string;
 }
 
+/** A point in data coordinates (bar open time + price) so drawings track pan/zoom. */
+export interface DrawingPoint {
+  time: number;
+  price: number;
+}
+
+/** A user drawing: a horizontal price level, or a trend line between two points. */
+export type Drawing =
+  | { kind: 'horizontal'; price: number; color?: string }
+  | { kind: 'trend'; a: DrawingPoint; b: DrawingPoint; color?: string };
+
 export interface ChartProps {
   symbol: SymbolInfo;
   interval: Interval;
@@ -339,6 +350,8 @@ export interface ChartProps {
   priceLines?: PriceLine[];
   /** Markers anchored to bars, matched by open time. */
   markers?: ChartMarker[];
+  /** Trend + horizontal line drawings in data coords (persist them per-symbol). */
+  drawings?: Drawing[];
   style?: StyleProp<ViewStyle>;
   onCrosshairMove?: (bar: Candle | null, index: number) => void;
   onViewportChange?: (v: Viewport) => void;

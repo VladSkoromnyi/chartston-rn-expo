@@ -40,6 +40,7 @@ import type {
   ChartMarker,
   ChartProps,
   ChartStudiesConfig,
+  Drawing,
   PaneStudyId,
   PriceLine,
 } from '../types';
@@ -120,6 +121,8 @@ const MARKER_SIZE = 5;
 const MARKER_GAP = 8; // px between a bar's extreme and its marker
 const EMPTY_PRICE_LINES: PriceLine[] = [];
 const EMPTY_MARKERS: ChartMarker[] = [];
+const EMPTY_DRAWINGS: Drawing[] = [];
+const DRAWING_DEFAULT_COLOR = '#f0b90b';
 
 const DEFAULT_ACTIVE_STUDIES: ChartStudiesConfig = {
   overlays: ['sma', 'ema', 'bollinger', 'vwap', 'volume'],
@@ -138,6 +141,23 @@ const noop = () => {};
 /** Append an 8-bit alpha (e.g. '4d') to a #RRGGBB hex; pass other colors through. */
 function withAlpha(color: string, alpha: string): string {
   return /^#[0-9a-fA-F]{6}$/.test(color) ? color + alpha : color;
+}
+
+/** Index of the bar whose open time is nearest `t` (binary search; times ascending). */
+function nearestIndexByTime(times: number[], t: number): number {
+  const n = times.length;
+  if (n === 0) return -1;
+  let lo = 0;
+  let hi = n - 1;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (times[mid]! < t) lo = mid + 1;
+    else hi = mid;
+  }
+  if (lo > 0 && Math.abs(times[lo - 1]! - t) <= Math.abs(times[lo]! - t)) {
+    return lo - 1;
+  }
+  return lo;
 }
 
 /** Small filled triangle for arrow markers (apex up or down). */
@@ -346,6 +366,7 @@ export function Chart(props: ChartProps): ReactElement {
     chartType = 'candlestick',
     priceLines = EMPTY_PRICE_LINES,
     markers = EMPTY_MARKERS,
+    drawings = EMPTY_DRAWINGS,
   } = props;
   const theme = themeProp ?? DARK_THEME;
   const font = useMemo(
@@ -765,12 +786,47 @@ export function Chart(props: ChartProps): ReactElement {
       });
     }
 
+    // Drawings (declarative, data-coord) — mapped to screen so they track pan/zoom.
+    const drawingGeoms: (
+      | { kind: 'h'; y: number; color: string }
+      | {
+          kind: 't';
+          x1: number;
+          y1: number;
+          x2: number;
+          y2: number;
+          color: string;
+        }
+    )[] = [];
+    for (const d of drawings) {
+      const color = d.color ?? DRAWING_DEFAULT_COLOR;
+      if (d.kind === 'horizontal') {
+        const y = priceToY(d.price, range, pricePaneHeight, false);
+        if (y >= 0 && y <= pricePaneHeight) {
+          drawingGeoms.push({ kind: 'h', y, color });
+        }
+      } else {
+        const ia = nearestIndexByTime(columns.times, d.a.time);
+        const ib = nearestIndexByTime(columns.times, d.b.time);
+        if (ia < 0 || ib < 0) continue;
+        drawingGeoms.push({
+          kind: 't',
+          x1: indexToCenterX(ia, viewport),
+          y1: priceToY(d.a.price, range, pricePaneHeight, false),
+          x2: indexToCenterX(ib, viewport),
+          y2: priceToY(d.b.price, range, pricePaneHeight, false),
+          color,
+        });
+      }
+    }
+
     return {
       series,
       overlays,
       volume,
       priceLineGeoms,
       markerGeoms,
+      drawingGeoms,
       priceTicks,
       timeTicks,
       range,
@@ -790,6 +846,7 @@ export function Chart(props: ChartProps): ReactElement {
     chartType,
     priceLines,
     markers,
+    drawings,
   ]);
 
   // Crosshair info (snap to nearest bar on x; free price on y). The price readout
@@ -1249,6 +1306,38 @@ export function Chart(props: ChartProps): ReactElement {
                     </Group>
                   );
                 })}
+              </Group>
+            )}
+
+            {/* Drawings (declarative, data-coord) — clipped to the price pane. */}
+            {frame && frame.drawingGeoms.length > 0 && (
+              <Group
+                clip={Skia.XYWHRect(
+                  0,
+                  0,
+                  Math.max(0, plotWidth),
+                  Math.max(0, frame.pricePaneHeight)
+                )}
+              >
+                {frame.drawingGeoms.map((d, i) =>
+                  d.kind === 'h' ? (
+                    <Line
+                      key={`dr-${i}`}
+                      p1={vec(0, d.y)}
+                      p2={vec(plotWidth, d.y)}
+                      color={d.color}
+                      strokeWidth={1.5}
+                    />
+                  ) : (
+                    <Line
+                      key={`dr-${i}`}
+                      p1={vec(d.x1, d.y1)}
+                      p2={vec(d.x2, d.y2)}
+                      color={d.color}
+                      strokeWidth={1.5}
+                    />
+                  )
+                )}
               </Group>
             )}
 

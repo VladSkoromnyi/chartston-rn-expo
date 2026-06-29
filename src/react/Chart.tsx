@@ -23,6 +23,7 @@ import {
 } from 'react-native-reanimated';
 import {
   Canvas,
+  Circle,
   Group,
   Line,
   Path,
@@ -36,9 +37,11 @@ import type { SkPath } from '@shopify/react-native-skia';
 import type {
   Candle,
   CandleUpdate,
+  ChartMarker,
   ChartProps,
   ChartStudiesConfig,
   PaneStudyId,
+  PriceLine,
 } from '../types';
 import { DARK_THEME } from '../theme';
 import {
@@ -112,6 +115,12 @@ const RSI_GUIDE_LOWER = 30;
 const SERIES_LINE_COLOR = '#2962ff'; // line/area stroke — TradingView blue
 const SERIES_AREA_ALPHA = '22'; // ~13% fill under the line/baseline
 
+// Markers / price lines (Stage 8).
+const MARKER_SIZE = 5;
+const MARKER_GAP = 8; // px between a bar's extreme and its marker
+const EMPTY_PRICE_LINES: PriceLine[] = [];
+const EMPTY_MARKERS: ChartMarker[] = [];
+
 const DEFAULT_ACTIVE_STUDIES: ChartStudiesConfig = {
   overlays: ['sma', 'ema', 'bollinger', 'vwap', 'volume'],
   panes: ['rsi', 'macd'],
@@ -129,6 +138,27 @@ const noop = () => {};
 /** Append an 8-bit alpha (e.g. '4d') to a #RRGGBB hex; pass other colors through. */
 function withAlpha(color: string, alpha: string): string {
   return /^#[0-9a-fA-F]{6}$/.test(color) ? color + alpha : color;
+}
+
+/** Small filled triangle for arrow markers (apex up or down). */
+function trianglePath(
+  cx: number,
+  cy: number,
+  size: number,
+  up: boolean
+): SkPath {
+  const p = Skia.Path.Make();
+  if (up) {
+    p.moveTo(cx, cy - size);
+    p.lineTo(cx - size, cy + size);
+    p.lineTo(cx + size, cy + size);
+  } else {
+    p.moveTo(cx, cy + size);
+    p.lineTo(cx - size, cy - size);
+    p.lineTo(cx + size, cy - size);
+  }
+  p.close();
+  return p;
 }
 
 interface OHLCV {
@@ -314,6 +344,8 @@ export function Chart(props: ChartProps): ReactElement {
     onCrosshairMove,
     activeStudies = DEFAULT_ACTIVE_STUDIES,
     chartType = 'candlestick',
+    priceLines = EMPTY_PRICE_LINES,
+    markers = EMPTY_MARKERS,
   } = props;
   const theme = themeProp ?? DARK_THEME;
   const font = useMemo(
@@ -676,10 +708,69 @@ export function Chart(props: ChartProps): ReactElement {
       volume: columns.volumes[li]!,
       up: columns.closes[li]! >= columns.opens[li]!,
     };
+    // Price lines (declarative) — map to y; keep those inside the price pane.
+    const priceLineGeoms = priceLines
+      .map((pl) => ({
+        y: priceToY(pl.price, range, pricePaneHeight, false),
+        line: pl,
+        title: pl.title ?? formatPrice(pl.price, symbol.pricePrecision),
+      }))
+      .filter((g) => g.y >= 0 && g.y <= pricePaneHeight);
+
+    // Markers (declarative) — snap each to the nearest visible bar by open time.
+    const markerGeoms: {
+      x: number;
+      y: number;
+      shape: NonNullable<ChartMarker['shape']>;
+      path: SkPath | null;
+      color?: string;
+      text?: string;
+    }[] = [];
+    for (const mk of markers) {
+      let idx = -1;
+      let best = Infinity;
+      for (let i = start; i <= end; i++) {
+        const d = Math.abs(columns.times[i]! - mk.time);
+        if (d < best) {
+          best = d;
+          idx = i;
+        }
+      }
+      if (idx < 0) continue;
+      const mx = indexToCenterX(idx, viewport);
+      if (mx < 0 || mx > plotWidth) continue;
+      const pos = mk.position ?? 'aboveBar';
+      const my =
+        pos === 'belowBar'
+          ? priceToY(columns.lows[idx]!, range, pricePaneHeight, false) +
+            MARKER_GAP
+          : pos === 'inBar'
+            ? priceToY(columns.closes[idx]!, range, pricePaneHeight, false)
+            : priceToY(columns.highs[idx]!, range, pricePaneHeight, false) -
+              MARKER_GAP;
+      const shape = mk.shape ?? 'circle';
+      const path =
+        shape === 'arrowUp'
+          ? trianglePath(mx, my, MARKER_SIZE, true)
+          : shape === 'arrowDown'
+            ? trianglePath(mx, my, MARKER_SIZE, false)
+            : null;
+      markerGeoms.push({
+        x: mx,
+        y: my,
+        shape,
+        path,
+        color: mk.color,
+        text: mk.text,
+      });
+    }
+
     return {
       series,
       overlays,
       volume,
+      priceLineGeoms,
+      markerGeoms,
       priceTicks,
       timeTicks,
       range,
@@ -697,6 +788,8 @@ export function Chart(props: ChartProps): ReactElement {
     studies,
     activeStudies,
     chartType,
+    priceLines,
+    markers,
   ]);
 
   // Crosshair info (snap to nearest bar on x; free price on y). The price readout
@@ -1088,6 +1181,76 @@ export function Chart(props: ChartProps): ReactElement {
                   color={theme.axisTextColor}
                 />
               ))}
+
+            {/* Price lines (declarative) — over the series, under the live tag. */}
+            {frame?.priceLineGeoms.map((g, i) => (
+              <Group key={`pln-${i}`}>
+                <Line
+                  p1={vec(0, g.y)}
+                  p2={vec(plotWidth, g.y)}
+                  color={g.line.color ?? theme.crosshairColor}
+                  strokeWidth={g.line.lineWidth ?? 1}
+                />
+                <Rect
+                  x={plotWidth}
+                  y={g.y - 8}
+                  width={PRICE_AXIS_WIDTH}
+                  height={16}
+                  color={g.line.color ?? theme.crosshairColor}
+                />
+                {font && (
+                  <Text
+                    x={plotWidth + 4}
+                    y={g.y + 4}
+                    text={g.title}
+                    font={font}
+                    color={theme.crosshairLabelText}
+                  />
+                )}
+              </Group>
+            ))}
+
+            {/* Markers (declarative) — anchored to bars, clipped to the price pane. */}
+            {frame && frame.markerGeoms.length > 0 && (
+              <Group
+                clip={Skia.XYWHRect(
+                  0,
+                  0,
+                  Math.max(0, plotWidth),
+                  Math.max(0, frame.pricePaneHeight)
+                )}
+              >
+                {frame.markerGeoms.map((m, i) => {
+                  const c = m.color ?? theme.crosshairColor;
+                  return (
+                    <Group key={`mk-${i}`}>
+                      {m.shape === 'circle' && (
+                        <Circle cx={m.x} cy={m.y} r={MARKER_SIZE} color={c} />
+                      )}
+                      {m.shape === 'square' && (
+                        <Rect
+                          x={m.x - MARKER_SIZE}
+                          y={m.y - MARKER_SIZE}
+                          width={MARKER_SIZE * 2}
+                          height={MARKER_SIZE * 2}
+                          color={c}
+                        />
+                      )}
+                      {m.path && <Path path={m.path} color={c} />}
+                      {font && m.text && (
+                        <Text
+                          x={m.x + MARKER_SIZE + 2}
+                          y={m.y + 3}
+                          text={m.text}
+                          font={font}
+                          color={c}
+                        />
+                      )}
+                    </Group>
+                  );
+                })}
+              </Group>
+            )}
 
             {/* Last-price line + tag */}
             {frame && (

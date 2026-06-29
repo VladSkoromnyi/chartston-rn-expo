@@ -62,8 +62,12 @@ import {
 } from '../core';
 import type { CandleColumns } from '../core';
 import {
+  buildAreaSeries,
+  buildBarSeries,
+  buildBaselineSeries,
   buildCandleGeometry,
   buildLinePath,
+  buildLineSeries,
   buildSignedHistogram,
   buildVolumeHistogram,
 } from '../render';
@@ -103,6 +107,10 @@ const MACD_HIST_DOWN_COLOR = '#ef5350';
 const RSI_COLOR = '#b388ff'; // rsi line — light purple
 const RSI_GUIDE_UPPER = 70;
 const RSI_GUIDE_LOWER = 30;
+
+// Non-candlestick series (Stage 8).
+const SERIES_LINE_COLOR = '#2962ff'; // line/area stroke — TradingView blue
+const SERIES_AREA_ALPHA = '22'; // ~13% fill under the line/baseline
 
 const DEFAULT_ACTIVE_STUDIES: ChartStudiesConfig = {
   overlays: ['sma', 'ema', 'bollinger', 'vwap', 'volume'],
@@ -160,6 +168,14 @@ interface SubPane {
   guides: PaneGuide[];
   labels: PaneLabel[];
 }
+
+/** Price-pane series geometry — one variant per ChartType (Stage 8). */
+type SeriesGeom =
+  | { kind: 'candlestick'; geometry: ReturnType<typeof buildCandleGeometry> }
+  | { kind: 'bar'; upBars: SkPath; downBars: SkPath }
+  | { kind: 'line'; line: SkPath }
+  | { kind: 'area'; line: SkPath; area: SkPath }
+  | { kind: 'baseline'; line: SkPath; fill: SkPath; baselineY: number };
 
 /** Computed studies bundle (the `studies` useMemo output). */
 type StudiesBundle = {
@@ -297,6 +313,7 @@ export function Chart(props: ChartProps): ReactElement {
     style,
     onCrosshairMove,
     activeStudies = DEFAULT_ACTIVE_STUDIES,
+    chartType = 'candlestick',
   } = props;
   const theme = themeProp ?? DARK_THEME;
   const font = useMemo(
@@ -502,17 +519,55 @@ export function Chart(props: ChartProps): ReactElement {
     const pad = (hi - lo) * 0.1;
     const range = { min: lo - pad, max: hi + pad };
 
-    const geometry = buildCandleGeometry(
-      columns,
-      start,
-      end,
-      view.offset,
-      view.barSpacing,
-      range.min,
-      range.max,
-      pricePaneHeight,
-      false
-    );
+    // Price-pane series — candles by default; line/area/bar/baseline per chartType.
+    const seriesMap = {
+      offset: view.offset,
+      barSpacing: view.barSpacing,
+      rangeMin: range.min,
+      rangeMax: range.max,
+      height: pricePaneHeight,
+      logScale: false,
+    };
+    let series: SeriesGeom;
+    if (chartType === 'line') {
+      series = {
+        kind: 'line',
+        line: buildLineSeries(columns.closes, start, end, seriesMap),
+      };
+    } else if (chartType === 'area') {
+      series = {
+        kind: 'area',
+        ...buildAreaSeries(columns.closes, start, end, seriesMap),
+      };
+    } else if (chartType === 'bar') {
+      series = {
+        kind: 'bar',
+        ...buildBarSeries(columns, start, end, seriesMap),
+      };
+    } else if (chartType === 'baseline') {
+      const baseline = Number.isFinite(columns.closes[start]!)
+        ? columns.closes[start]!
+        : (range.min + range.max) / 2;
+      series = {
+        kind: 'baseline',
+        ...buildBaselineSeries(columns.closes, start, end, seriesMap, baseline),
+      };
+    } else {
+      series = {
+        kind: 'candlestick',
+        geometry: buildCandleGeometry(
+          columns,
+          start,
+          end,
+          view.offset,
+          view.barSpacing,
+          range.min,
+          range.max,
+          pricePaneHeight,
+          false
+        ),
+      };
+    }
     // Helper: an overlay line series mapped against the price-pane range.
     const overlayLine = (
       values: number[],
@@ -622,7 +677,7 @@ export function Chart(props: ChartProps): ReactElement {
       up: columns.closes[li]! >= columns.opens[li]!,
     };
     return {
-      geometry,
+      series,
       overlays,
       volume,
       priceTicks,
@@ -641,6 +696,7 @@ export function Chart(props: ChartProps): ReactElement {
     symbol.pricePrecision,
     studies,
     activeStudies,
+    chartType,
   ]);
 
   // Crosshair info (snap to nearest bar on x; free price on y). The price readout
@@ -803,35 +859,131 @@ export function Chart(props: ChartProps): ReactElement {
                     />
                   </>
                 )}
-                <Path
-                  path={frame.geometry.upWicks}
-                  color={theme.wickUpColor}
-                  style="stroke"
-                  strokeWidth={1}
-                />
-                <Path
-                  path={frame.geometry.downWicks}
-                  color={theme.wickDownColor}
-                  style="stroke"
-                  strokeWidth={1}
-                />
-                <Path path={frame.geometry.upBodies} color={theme.upColor} />
-                <Path
-                  path={frame.geometry.downBodies}
-                  color={theme.downColor}
-                />
-                {theme.borderVisible && (
+                {frame.series.kind === 'candlestick' && (
                   <>
                     <Path
-                      path={frame.geometry.upBodies}
-                      color={theme.borderUpColor}
+                      path={frame.series.geometry.upWicks}
+                      color={theme.wickUpColor}
                       style="stroke"
                       strokeWidth={1}
                     />
                     <Path
-                      path={frame.geometry.downBodies}
-                      color={theme.borderDownColor}
+                      path={frame.series.geometry.downWicks}
+                      color={theme.wickDownColor}
                       style="stroke"
+                      strokeWidth={1}
+                    />
+                    <Path
+                      path={frame.series.geometry.upBodies}
+                      color={theme.upColor}
+                    />
+                    <Path
+                      path={frame.series.geometry.downBodies}
+                      color={theme.downColor}
+                    />
+                    {theme.borderVisible && (
+                      <>
+                        <Path
+                          path={frame.series.geometry.upBodies}
+                          color={theme.borderUpColor}
+                          style="stroke"
+                          strokeWidth={1}
+                        />
+                        <Path
+                          path={frame.series.geometry.downBodies}
+                          color={theme.borderDownColor}
+                          style="stroke"
+                          strokeWidth={1}
+                        />
+                      </>
+                    )}
+                  </>
+                )}
+                {frame.series.kind === 'bar' && (
+                  <>
+                    <Path
+                      path={frame.series.upBars}
+                      color={theme.upColor}
+                      style="stroke"
+                      strokeWidth={1.25}
+                    />
+                    <Path
+                      path={frame.series.downBars}
+                      color={theme.downColor}
+                      style="stroke"
+                      strokeWidth={1.25}
+                    />
+                  </>
+                )}
+                {frame.series.kind === 'line' && (
+                  <Path
+                    path={frame.series.line}
+                    color={SERIES_LINE_COLOR}
+                    style="stroke"
+                    strokeWidth={2}
+                  />
+                )}
+                {frame.series.kind === 'area' && (
+                  <>
+                    <Path
+                      path={frame.series.area}
+                      color={withAlpha(SERIES_LINE_COLOR, SERIES_AREA_ALPHA)}
+                    />
+                    <Path
+                      path={frame.series.line}
+                      color={SERIES_LINE_COLOR}
+                      style="stroke"
+                      strokeWidth={2}
+                    />
+                  </>
+                )}
+                {frame.series.kind === 'baseline' && (
+                  <>
+                    <Group
+                      clip={Skia.XYWHRect(
+                        0,
+                        0,
+                        Math.max(0, plotWidth),
+                        Math.max(0, frame.series.baselineY)
+                      )}
+                    >
+                      <Path
+                        path={frame.series.fill}
+                        color={withAlpha(theme.upColor, SERIES_AREA_ALPHA)}
+                      />
+                      <Path
+                        path={frame.series.line}
+                        color={theme.upColor}
+                        style="stroke"
+                        strokeWidth={2}
+                      />
+                    </Group>
+                    <Group
+                      clip={Skia.XYWHRect(
+                        0,
+                        frame.series.baselineY,
+                        Math.max(0, plotWidth),
+                        Math.max(
+                          0,
+                          frame.pricePaneHeight - frame.series.baselineY
+                        )
+                      )}
+                    >
+                      <Path
+                        path={frame.series.fill}
+                        color={withAlpha(theme.downColor, SERIES_AREA_ALPHA)}
+                      />
+                      <Path
+                        path={frame.series.line}
+                        color={theme.downColor}
+                        style="stroke"
+                        strokeWidth={2}
+                      />
+                    </Group>
+                    <Line
+                      p1={vec(0, frame.series.baselineY)}
+                      p2={vec(plotWidth, frame.series.baselineY)}
+                      color={theme.axisLineColor}
                       strokeWidth={1}
                     />
                   </>

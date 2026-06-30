@@ -15,53 +15,62 @@
   "files": [
     "src",
     "lib",
-    "android",
-    "ios",
-    "cpp",
-    "*.podspec",
-    "react-native.config.js",
-    "!ios/build",
-    "!android/build",
-    "!android/gradle",
-    "!android/gradlew",
-    "!android/gradlew.bat",
-    "!android/local.properties",
     "!**/__tests__",
     "!**/__fixtures__",
     "!**/__mocks__",
     "!**/.*"
   ],
   "scripts": {
-    "example": "yarn workspace chartston-example",
     "clean": "del-cli lib",
     "prepare": "bob build",
-    "typecheck": "tsc",
-    "lint": "eslint \"**/*.{js,ts,tsx}\""
+    "typecheck": "tsc -p tsconfig.build.json",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "bob build && changeset publish"
   },
   "keywords": [
     "react-native",
+    "expo",
+    "candlestick",
+    "candlestick-chart",
+    "chart",
+    "charting",
+    "trading",
+    "trading-chart",
+    "ohlc",
+    "technical-analysis",
+    "finance",
+    "skia",
+    "reanimated",
+    "gpu",
+    "new-architecture",
     "ios",
     "android"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vlad-skoromnyi/chartston.git"
+    "url": "git+https://github.com/VladSkoromnyi/chartston-rn-expo.git"
   },
-  "author": "Vlad Skoromnyi <vlad.skoromnyi.work@gmail.com> (https://github.com/vlad-skoromnyi)",
+  "author": "Vlad Skoromnyi <vlad.skoromnyi.work@gmail.com> (https://github.com/VladSkoromnyi)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/vlad-skoromnyi/chartston/issues"
+    "url": "https://github.com/VladSkoromnyi/chartston-rn-expo/issues"
   },
-  "homepage": "https://github.com/vlad-skoromnyi/chartston#readme",
+  "homepage": "https://github.com/VladSkoromnyi/chartston-rn-expo#readme",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "@eslint/compat": "^2.1.0",
     "@eslint/eslintrc": "^3.3.5",
     "@eslint/js": "^10.0.1",
+    "@gorhom/bottom-sheet": "5.2.14",
     "@react-native/babel-preset": "0.85.0",
     "@react-native/eslint-config": "0.85.0",
+    "@shopify/react-native-skia": "2.6.2",
     "@types/react": "^19.2.0",
     "del-cli": "^7.0.0",
     "eslint": "^9.39.4",
@@ -72,16 +81,26 @@
     "react": "19.2.0",
     "react-native": "0.83.6",
     "react-native-builder-bob": "^0.43.0",
-    "turbo": "^2.9.16",
-    "typescript": "^6.0.3"
+    "react-native-gesture-handler": "2.31.1",
+    "react-native-reanimated": "4.3.1",
+    "react-native-worklets": "0.8.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
   },
   "peerDependencies": {
-    "react": "*",
-    "react-native": "*"
+    "@gorhom/bottom-sheet": ">=5.0.0",
+    "@shopify/react-native-skia": ">=2.0.0",
+    "react": ">=19.0.0",
+    "react-native": ">=0.79.0",
+    "react-native-gesture-handler": ">=2.31.0",
+    "react-native-reanimated": ">=4.0.0",
+    "react-native-worklets": ">=0.4.0"
   },
-  "workspaces": [
-    "example"
-  ],
+  "peerDependenciesMeta": {
+    "@gorhom/bottom-sheet": {
+      "optional": true
+    }
+  },
   "packageManager": "yarn@4.11.0",
   "react-native-builder-bob": {
     "source": "src",

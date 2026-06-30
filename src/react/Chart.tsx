@@ -65,6 +65,7 @@ import {
   initialViewport,
   macd,
   niceTicks,
+  prependColumns,
   priceToY,
   rsi,
   sma,
@@ -88,6 +89,10 @@ import { useChartGestures } from '../gestures';
 const PRICE_AXIS_WIDTH = 56;
 const TIME_AXIS_HEIGHT = 24;
 const DEFAULT_BAR_SPACING = 8;
+// Lazy history: page older bars when the left edge gets within EDGE_LOAD_BARS of
+// the start; page size matches the initial backfill.
+const HISTORY_PAGE_SIZE = 500;
+const EDGE_LOAD_BARS = 30;
 const PRICE_TICK_COUNT = 5;
 const TIME_LABEL_MIN_PX = 64;
 const OVERLAY_SMA_COLOR = '#f0b90b';
@@ -419,6 +424,12 @@ export function Chart(props: ChartProps): ReactElement {
   const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
   const positioned = useRef(false);
   const lastTimeRef = useRef(-Infinity);
+  // Lazy-history loading state (refs — not reactive).
+  const columnsRef = useRef<CandleColumns | null>(null);
+  columnsRef.current = columns;
+  const loadingOlder = useRef(false);
+  const hasMoreHistory = useRef(true);
+  const loadGenRef = useRef(0);
 
   // Apply a live update (Stage 4–5). Time-keyed so backfill↔live merges correctly:
   // a bar whose open time matches the last bar patches it; a newer one appends.
@@ -465,6 +476,10 @@ export function Chart(props: ChartProps): ReactElement {
     const controller = new AbortController();
     setLoadError(false);
     setStatus('connecting');
+    // Reset lazy-history for the new symbol/interval (invalidate in-flight loads).
+    loadGenRef.current += 1;
+    hasMoreHistory.current = true;
+    loadingOlder.current = false;
     adapter
       .fetchHistory({ symbol, interval, signal: controller.signal })
       .then((candles) => {
@@ -512,6 +527,54 @@ export function Chart(props: ChartProps): ReactElement {
     setView({ offset: init.offset, barSpacing: init.barSpacing });
     positioned.current = true;
   }, [columns, plotWidth, offset, barSpacing]);
+
+  // Lazy history — fetch + prepend older bars when the user scrolls near the start.
+  const loadOlder = useCallback(async () => {
+    const cols = columnsRef.current;
+    if (
+      loadingOlder.current ||
+      !hasMoreHistory.current ||
+      !cols ||
+      cols.times.length === 0
+    ) {
+      return;
+    }
+    const oldest = cols.times[0]!;
+    const gen = loadGenRef.current;
+    loadingOlder.current = true;
+    try {
+      const older = await adapter.fetchHistory({
+        symbol,
+        interval,
+        endTime: oldest - 1,
+        limit: HISTORY_PAGE_SIZE,
+      });
+      if (gen !== loadGenRef.current) return; // symbol/interval switched — discard
+      const added = older.filter((c) => c.time < oldest).length;
+      if (added === 0) {
+        hasMoreHistory.current = false;
+        return;
+      }
+      // Prepend, then shift the viewport by the added count so it stays put.
+      setColumns((prev) => (prev ? prependColumns(prev, older) : prev));
+      dataLen.value += added;
+      offset.value += added;
+      setView((v) => ({ ...v, offset: v.offset + added }));
+      if (older.length < HISTORY_PAGE_SIZE) hasMoreHistory.current = false;
+    } catch {
+      // transient — retried on the next edge hit
+    } finally {
+      if (gen === loadGenRef.current) loadingOlder.current = false;
+    }
+  }, [adapter, symbol, interval, dataLen, offset]);
+
+  // Trigger lazy history when the left edge approaches the oldest loaded bar.
+  useEffect(() => {
+    if (!columns || columns.times.length === 0) return;
+    if (view.offset > EDGE_LOAD_BARS) return;
+    if (loadingOlder.current || !hasMoreHistory.current) return;
+    loadOlder();
+  }, [view.offset, columns, loadOlder]);
 
   // Mirror viewport + crosshair shared values into React state.
   useAnimatedReaction(

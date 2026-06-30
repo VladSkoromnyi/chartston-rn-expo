@@ -18,6 +18,7 @@ Chartston draws interactive financial charts on the GPU and keeps everything tha
 - **Buttery navigation** — pan, pinch-to-zoom (focal-anchored), and flick momentum, driven by UI-thread worklets.
 - **Crosshair & legend** — long-press snaps to the nearest bar with a synchronized OHLCV legend and a last-price tag.
 - **Live streaming** — time-keyed `snapshot` / `append` / `patch` updates (active-bar tick vs. new bar), with no whole-series flicker.
+- **Lazy history** — scroll back toward the start and older candles page in automatically (via the adapter's `endTime`), keeping your viewport in place.
 - **Built-in studies** — SMA, EMA, WMA, Bollinger, RSI, MACD, ATR, Stochastic, VWAP.
   - Price-pane **overlays** (SMA / EMA / Bollinger / VWAP) + a faint **volume** histogram behind the candles.
   - **Oscillator sub-panes** (RSI, MACD) that share the x-axis.

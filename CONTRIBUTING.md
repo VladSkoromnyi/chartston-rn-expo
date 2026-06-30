@@ -92,6 +92,24 @@ The `package.json` file contains various scripts for common tasks:
   - `yarn example web`: run the example app on Web.
 - `yarn example build:web`: build the example app for Web.
   
+### Branching & release workflow
+
+This project uses **three long-lived branches** plus **dated release branches**:
+
+| Branch | Purpose |
+|---|---|
+| `main` | The last **stable** version. Updated **only** by merging a release branch; every merge is tagged `v<version>`. |
+| `stage` | **Staging** — integration testing + fixes before a release is cut. |
+| `develop` | Active **development** — features and fixes integrate here. |
+
+- **Feature / fix work** branches off `develop`: `feat/<short-name>` or `fix/<short-name>` → PR back into `develop`.
+- **Promotion:** merge `develop` → `stage` when a set of changes is ready for integration testing.
+- **Release:** cut a branch named `release_<version>_<DDMMYYYY>` from `stage`
+  (e.g. `release_1.0.0_27062026`), stabilize it, then merge into `main` (tag `v<version>`)
+  and back into `develop`.
+- **Flow:** `feat/* → develop → stage → release_<x.y.z>_<DDMMYYYY> → main` (tag) → back-merge to `develop`.
+- **Commits** follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat`, `fix`, `perf`, `docs`, `test`, `chore`).
+
 ### Sending a pull request
 
 > **Working on your first pull request?** You can learn how from this _free_ series: [How to Contribute to an Open Source Project on GitHub](https://app.egghead.io/playlists/how-to-contribute-to-an-open-source-project-on-github).

@@ -965,6 +965,11 @@ export function Chart(props: ChartProps): ReactElement {
     : [];
 
   const lastY = frame ? frame.lastY : Number.NEGATIVE_INFINITY;
+  // Keep the live-price tag inside the price pane even when the latest price is
+  // outside the visible (auto-scaled) range — it pins to the top/bottom edge.
+  const lastTagY = frame
+    ? Math.max(8, Math.min(frame.pricePaneHeight - 8, frame.lastY))
+    : 0;
   const statusLabel = STATUS_LABEL[status];
   const statusDotColor =
     status === 'open'
@@ -1376,22 +1381,25 @@ export function Chart(props: ChartProps): ReactElement {
               </Group>
             )}
 
-            {/* Last-price line + tag */}
+            {/* Last-price line + tag — tag is clamped inside the price pane; the
+                line is hidden when the latest price is outside the visible range. */}
             {frame && (
               <Group>
-                <Line
-                  p1={vec(0, frame.lastY)}
-                  p2={vec(plotWidth, frame.lastY)}
-                  color={
-                    frame.last.up
-                      ? theme.lastPriceUpColor
-                      : theme.lastPriceDownColor
-                  }
-                  strokeWidth={1}
-                />
+                {frame.lastY >= 0 && frame.lastY <= frame.pricePaneHeight && (
+                  <Line
+                    p1={vec(0, frame.lastY)}
+                    p2={vec(plotWidth, frame.lastY)}
+                    color={
+                      frame.last.up
+                        ? theme.lastPriceUpColor
+                        : theme.lastPriceDownColor
+                    }
+                    strokeWidth={1}
+                  />
+                )}
                 <Rect
                   x={plotWidth}
-                  y={frame.lastY - 8}
+                  y={lastTagY - 8}
                   width={PRICE_AXIS_WIDTH}
                   height={16}
                   color={
@@ -1403,7 +1411,7 @@ export function Chart(props: ChartProps): ReactElement {
                 {font && (
                   <Text
                     x={plotWidth + 4}
-                    y={frame.lastY + 4}
+                    y={lastTagY + 4}
                     text={formatPrice(frame.last.close, symbol.pricePrecision)}
                     font={font}
                     color={theme.crosshairLabelText}

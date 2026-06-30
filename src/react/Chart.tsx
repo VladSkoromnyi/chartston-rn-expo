@@ -13,7 +13,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text as RNText,
+  View,
+} from 'react-native';
 import type { LayoutChangeEvent } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
 import {
@@ -23,6 +30,7 @@ import {
 } from 'react-native-reanimated';
 import {
   Canvas,
+  Circle,
   Group,
   Line,
   Path,
@@ -36,9 +44,13 @@ import type { SkPath } from '@shopify/react-native-skia';
 import type {
   Candle,
   CandleUpdate,
+  ChartMarker,
   ChartProps,
   ChartStudiesConfig,
+  ConnectionStatus,
+  Drawing,
   PaneStudyId,
+  PriceLine,
 } from '../types';
 import { DARK_THEME } from '../theme';
 import {
@@ -62,8 +74,12 @@ import {
 } from '../core';
 import type { CandleColumns } from '../core';
 import {
+  buildAreaSeries,
+  buildBarSeries,
+  buildBaselineSeries,
   buildCandleGeometry,
   buildLinePath,
+  buildLineSeries,
   buildSignedHistogram,
   buildVolumeHistogram,
 } from '../render';
@@ -87,7 +103,7 @@ const SUBPANE_HEIGHT = 96;
 const MIN_PRICE_PANE_HEIGHT = 120;
 const PANE_PADDING_Y = 6; // inset so series don't touch the separators
 
-// Volume overlay (TradingView-style): a faint histogram anchored to the bottom of
+// Volume overlay (exchange-style): a faint histogram anchored to the bottom of
 // the price pane and drawn behind the candles, capped at a fraction of the pane.
 const VOLUME_OVERLAY_FRACTION = 0.22;
 const VOLUME_OVERLAY_ALPHA = '4d'; // ~30% — subtle so the candles stay legible
@@ -103,6 +119,28 @@ const MACD_HIST_DOWN_COLOR = '#ef5350';
 const RSI_COLOR = '#b388ff'; // rsi line — light purple
 const RSI_GUIDE_UPPER = 70;
 const RSI_GUIDE_LOWER = 30;
+
+// Non-candlestick series (Stage 8).
+const SERIES_LINE_COLOR = '#2962ff'; // line/area stroke — a standard chart blue
+const SERIES_AREA_ALPHA = '22'; // ~13% fill under the line/baseline
+
+// Markers / price lines (Stage 8).
+const MARKER_SIZE = 5;
+const MARKER_GAP = 8; // px between a bar's extreme and its marker
+const EMPTY_PRICE_LINES: PriceLine[] = [];
+const EMPTY_MARKERS: ChartMarker[] = [];
+const EMPTY_DRAWINGS: Drawing[] = [];
+const DRAWING_DEFAULT_COLOR = '#f0b90b';
+
+// Connection-status chip labels (Stage 8 "states"). The adapter emits the status.
+const STATUS_LABEL: Record<ConnectionStatus, string> = {
+  idle: 'Idle',
+  connecting: 'Connecting…',
+  open: 'Live',
+  reconnecting: 'Reconnecting…',
+  closed: 'Offline',
+  error: 'Error',
+};
 
 const DEFAULT_ACTIVE_STUDIES: ChartStudiesConfig = {
   overlays: ['sma', 'ema', 'bollinger', 'vwap', 'volume'],
@@ -121,6 +159,44 @@ const noop = () => {};
 /** Append an 8-bit alpha (e.g. '4d') to a #RRGGBB hex; pass other colors through. */
 function withAlpha(color: string, alpha: string): string {
   return /^#[0-9a-fA-F]{6}$/.test(color) ? color + alpha : color;
+}
+
+/** Index of the bar whose open time is nearest `t` (binary search; times ascending). */
+function nearestIndexByTime(times: number[], t: number): number {
+  const n = times.length;
+  if (n === 0) return -1;
+  let lo = 0;
+  let hi = n - 1;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (times[mid]! < t) lo = mid + 1;
+    else hi = mid;
+  }
+  if (lo > 0 && Math.abs(times[lo - 1]! - t) <= Math.abs(times[lo]! - t)) {
+    return lo - 1;
+  }
+  return lo;
+}
+
+/** Small filled triangle for arrow markers (apex up or down). */
+function trianglePath(
+  cx: number,
+  cy: number,
+  size: number,
+  up: boolean
+): SkPath {
+  const p = Skia.Path.Make();
+  if (up) {
+    p.moveTo(cx, cy - size);
+    p.lineTo(cx - size, cy + size);
+    p.lineTo(cx + size, cy + size);
+  } else {
+    p.moveTo(cx, cy + size);
+    p.lineTo(cx - size, cy - size);
+    p.lineTo(cx + size, cy - size);
+  }
+  p.close();
+  return p;
 }
 
 interface OHLCV {
@@ -160,6 +236,14 @@ interface SubPane {
   guides: PaneGuide[];
   labels: PaneLabel[];
 }
+
+/** Price-pane series geometry — one variant per ChartType (Stage 8). */
+type SeriesGeom =
+  | { kind: 'candlestick'; geometry: ReturnType<typeof buildCandleGeometry> }
+  | { kind: 'bar'; upBars: SkPath; downBars: SkPath }
+  | { kind: 'line'; line: SkPath }
+  | { kind: 'area'; line: SkPath; area: SkPath }
+  | { kind: 'baseline'; line: SkPath; fill: SkPath; baselineY: number };
 
 /** Computed studies bundle (the `studies` useMemo output). */
 type StudiesBundle = {
@@ -297,6 +381,10 @@ export function Chart(props: ChartProps): ReactElement {
     style,
     onCrosshairMove,
     activeStudies = DEFAULT_ACTIVE_STUDIES,
+    chartType = 'candlestick',
+    priceLines = EMPTY_PRICE_LINES,
+    markers = EMPTY_MARKERS,
+    drawings = EMPTY_DRAWINGS,
   } = props;
   const theme = themeProp ?? DARK_THEME;
   const font = useMemo(
@@ -312,6 +400,9 @@ export function Chart(props: ChartProps): ReactElement {
   plotWidthRef.current = plotWidth;
 
   const [columns, setColumns] = useState<CandleColumns | null>(null);
+  const [status, setStatus] = useState<ConnectionStatus>('idle');
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Shared viewport + crosshair (mutated by gestures on the UI thread).
   const offset = useSharedValue(0);
@@ -372,6 +463,8 @@ export function Chart(props: ChartProps): ReactElement {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     const controller = new AbortController();
+    setLoadError(false);
+    setStatus('connecting');
     adapter
       .fetchHistory({ symbol, interval, signal: controller.signal })
       .then((candles) => {
@@ -387,20 +480,23 @@ export function Chart(props: ChartProps): ReactElement {
           onUpdate: (u) => {
             if (!cancelled) applyUpdate(u);
           },
-          onStatus: () => {
-            // TODO(stage-5): surface connection status chip.
+          onStatus: (s) => {
+            if (!cancelled) setStatus(s);
           },
         });
       })
       .catch(() => {
-        // TODO(stage-5): surface load errors via connection status.
+        if (!cancelled) {
+          setLoadError(true);
+          setStatus('error');
+        }
       });
     return () => {
       cancelled = true;
       controller.abort();
       unsubscribe?.();
     };
-  }, [adapter, symbol, interval, dataLen, applyUpdate]);
+  }, [adapter, symbol, interval, dataLen, applyUpdate, reloadKey]);
 
   // Position at the live edge once data + size are known.
   useEffect(() => {
@@ -502,17 +598,55 @@ export function Chart(props: ChartProps): ReactElement {
     const pad = (hi - lo) * 0.1;
     const range = { min: lo - pad, max: hi + pad };
 
-    const geometry = buildCandleGeometry(
-      columns,
-      start,
-      end,
-      view.offset,
-      view.barSpacing,
-      range.min,
-      range.max,
-      pricePaneHeight,
-      false
-    );
+    // Price-pane series — candles by default; line/area/bar/baseline per chartType.
+    const seriesMap = {
+      offset: view.offset,
+      barSpacing: view.barSpacing,
+      rangeMin: range.min,
+      rangeMax: range.max,
+      height: pricePaneHeight,
+      logScale: false,
+    };
+    let series: SeriesGeom;
+    if (chartType === 'line') {
+      series = {
+        kind: 'line',
+        line: buildLineSeries(columns.closes, start, end, seriesMap),
+      };
+    } else if (chartType === 'area') {
+      series = {
+        kind: 'area',
+        ...buildAreaSeries(columns.closes, start, end, seriesMap),
+      };
+    } else if (chartType === 'bar') {
+      series = {
+        kind: 'bar',
+        ...buildBarSeries(columns, start, end, seriesMap),
+      };
+    } else if (chartType === 'baseline') {
+      const baseline = Number.isFinite(columns.closes[start]!)
+        ? columns.closes[start]!
+        : (range.min + range.max) / 2;
+      series = {
+        kind: 'baseline',
+        ...buildBaselineSeries(columns.closes, start, end, seriesMap, baseline),
+      };
+    } else {
+      series = {
+        kind: 'candlestick',
+        geometry: buildCandleGeometry(
+          columns,
+          start,
+          end,
+          view.offset,
+          view.barSpacing,
+          range.min,
+          range.max,
+          pricePaneHeight,
+          false
+        ),
+      };
+    }
     // Helper: an overlay line series mapped against the price-pane range.
     const overlayLine = (
       values: number[],
@@ -552,7 +686,7 @@ export function Chart(props: ChartProps): ReactElement {
         overlays.push(overlayLine(studies.vwap, OVERLAY_VWAP_COLOR));
     }
     // Volume overlay — a faint bottom-anchored histogram behind the candles
-    // (TradingView-style), capped at VOLUME_OVERLAY_FRACTION of the price pane.
+    // (exchange-style), capped at VOLUME_OVERLAY_FRACTION of the price pane.
     let volume: { upBars: SkPath; downBars: SkPath } | null = null;
     if (studies && ov.has('volume')) {
       let maxV = 0;
@@ -621,10 +755,104 @@ export function Chart(props: ChartProps): ReactElement {
       volume: columns.volumes[li]!,
       up: columns.closes[li]! >= columns.opens[li]!,
     };
+    // Price lines (declarative) — map to y; keep those inside the price pane.
+    const priceLineGeoms = priceLines
+      .map((pl) => ({
+        y: priceToY(pl.price, range, pricePaneHeight, false),
+        line: pl,
+        title: pl.title ?? formatPrice(pl.price, symbol.pricePrecision),
+      }))
+      .filter((g) => g.y >= 0 && g.y <= pricePaneHeight);
+
+    // Markers (declarative) — snap each to the nearest visible bar by open time.
+    const markerGeoms: {
+      x: number;
+      y: number;
+      shape: NonNullable<ChartMarker['shape']>;
+      path: SkPath | null;
+      color?: string;
+      text?: string;
+    }[] = [];
+    for (const mk of markers) {
+      let idx = -1;
+      let best = Infinity;
+      for (let i = start; i <= end; i++) {
+        const d = Math.abs(columns.times[i]! - mk.time);
+        if (d < best) {
+          best = d;
+          idx = i;
+        }
+      }
+      if (idx < 0) continue;
+      const mx = indexToCenterX(idx, viewport);
+      if (mx < 0 || mx > plotWidth) continue;
+      const pos = mk.position ?? 'aboveBar';
+      const my =
+        pos === 'belowBar'
+          ? priceToY(columns.lows[idx]!, range, pricePaneHeight, false) +
+            MARKER_GAP
+          : pos === 'inBar'
+            ? priceToY(columns.closes[idx]!, range, pricePaneHeight, false)
+            : priceToY(columns.highs[idx]!, range, pricePaneHeight, false) -
+              MARKER_GAP;
+      const shape = mk.shape ?? 'circle';
+      const path =
+        shape === 'arrowUp'
+          ? trianglePath(mx, my, MARKER_SIZE, true)
+          : shape === 'arrowDown'
+            ? trianglePath(mx, my, MARKER_SIZE, false)
+            : null;
+      markerGeoms.push({
+        x: mx,
+        y: my,
+        shape,
+        path,
+        color: mk.color,
+        text: mk.text,
+      });
+    }
+
+    // Drawings (declarative, data-coord) — mapped to screen so they track pan/zoom.
+    const drawingGeoms: (
+      | { kind: 'h'; y: number; color: string }
+      | {
+          kind: 't';
+          x1: number;
+          y1: number;
+          x2: number;
+          y2: number;
+          color: string;
+        }
+    )[] = [];
+    for (const d of drawings) {
+      const color = d.color ?? DRAWING_DEFAULT_COLOR;
+      if (d.kind === 'horizontal') {
+        const y = priceToY(d.price, range, pricePaneHeight, false);
+        if (y >= 0 && y <= pricePaneHeight) {
+          drawingGeoms.push({ kind: 'h', y, color });
+        }
+      } else {
+        const ia = nearestIndexByTime(columns.times, d.a.time);
+        const ib = nearestIndexByTime(columns.times, d.b.time);
+        if (ia < 0 || ib < 0) continue;
+        drawingGeoms.push({
+          kind: 't',
+          x1: indexToCenterX(ia, viewport),
+          y1: priceToY(d.a.price, range, pricePaneHeight, false),
+          x2: indexToCenterX(ib, viewport),
+          y2: priceToY(d.b.price, range, pricePaneHeight, false),
+          color,
+        });
+      }
+    }
+
     return {
-      geometry,
+      series,
       overlays,
       volume,
+      priceLineGeoms,
+      markerGeoms,
+      drawingGeoms,
       priceTicks,
       timeTicks,
       range,
@@ -641,6 +869,10 @@ export function Chart(props: ChartProps): ReactElement {
     symbol.pricePrecision,
     studies,
     activeStudies,
+    chartType,
+    priceLines,
+    markers,
+    drawings,
   ]);
 
   // Crosshair info (snap to nearest bar on x; free price on y). The price readout
@@ -733,6 +965,20 @@ export function Chart(props: ChartProps): ReactElement {
     : [];
 
   const lastY = frame ? frame.lastY : Number.NEGATIVE_INFINITY;
+  // Keep the live-price tag inside the price pane even when the latest price is
+  // outside the visible (auto-scaled) range — it pins to the top/bottom edge.
+  const lastTagY = frame
+    ? Math.max(8, Math.min(frame.pricePaneHeight - 8, frame.lastY))
+    : 0;
+  const statusLabel = STATUS_LABEL[status];
+  const statusDotColor =
+    status === 'open'
+      ? theme.upColor
+      : status === 'connecting' || status === 'reconnecting'
+        ? '#f0b90b'
+        : status === 'error' || status === 'closed'
+          ? theme.downColor
+          : theme.axisTextColor;
 
   return (
     <GestureDetector gesture={gesture}>
@@ -803,35 +1049,131 @@ export function Chart(props: ChartProps): ReactElement {
                     />
                   </>
                 )}
-                <Path
-                  path={frame.geometry.upWicks}
-                  color={theme.wickUpColor}
-                  style="stroke"
-                  strokeWidth={1}
-                />
-                <Path
-                  path={frame.geometry.downWicks}
-                  color={theme.wickDownColor}
-                  style="stroke"
-                  strokeWidth={1}
-                />
-                <Path path={frame.geometry.upBodies} color={theme.upColor} />
-                <Path
-                  path={frame.geometry.downBodies}
-                  color={theme.downColor}
-                />
-                {theme.borderVisible && (
+                {frame.series.kind === 'candlestick' && (
                   <>
                     <Path
-                      path={frame.geometry.upBodies}
-                      color={theme.borderUpColor}
+                      path={frame.series.geometry.upWicks}
+                      color={theme.wickUpColor}
                       style="stroke"
                       strokeWidth={1}
                     />
                     <Path
-                      path={frame.geometry.downBodies}
-                      color={theme.borderDownColor}
+                      path={frame.series.geometry.downWicks}
+                      color={theme.wickDownColor}
                       style="stroke"
+                      strokeWidth={1}
+                    />
+                    <Path
+                      path={frame.series.geometry.upBodies}
+                      color={theme.upColor}
+                    />
+                    <Path
+                      path={frame.series.geometry.downBodies}
+                      color={theme.downColor}
+                    />
+                    {theme.borderVisible && (
+                      <>
+                        <Path
+                          path={frame.series.geometry.upBodies}
+                          color={theme.borderUpColor}
+                          style="stroke"
+                          strokeWidth={1}
+                        />
+                        <Path
+                          path={frame.series.geometry.downBodies}
+                          color={theme.borderDownColor}
+                          style="stroke"
+                          strokeWidth={1}
+                        />
+                      </>
+                    )}
+                  </>
+                )}
+                {frame.series.kind === 'bar' && (
+                  <>
+                    <Path
+                      path={frame.series.upBars}
+                      color={theme.upColor}
+                      style="stroke"
+                      strokeWidth={1.25}
+                    />
+                    <Path
+                      path={frame.series.downBars}
+                      color={theme.downColor}
+                      style="stroke"
+                      strokeWidth={1.25}
+                    />
+                  </>
+                )}
+                {frame.series.kind === 'line' && (
+                  <Path
+                    path={frame.series.line}
+                    color={SERIES_LINE_COLOR}
+                    style="stroke"
+                    strokeWidth={2}
+                  />
+                )}
+                {frame.series.kind === 'area' && (
+                  <>
+                    <Path
+                      path={frame.series.area}
+                      color={withAlpha(SERIES_LINE_COLOR, SERIES_AREA_ALPHA)}
+                    />
+                    <Path
+                      path={frame.series.line}
+                      color={SERIES_LINE_COLOR}
+                      style="stroke"
+                      strokeWidth={2}
+                    />
+                  </>
+                )}
+                {frame.series.kind === 'baseline' && (
+                  <>
+                    <Group
+                      clip={Skia.XYWHRect(
+                        0,
+                        0,
+                        Math.max(0, plotWidth),
+                        Math.max(0, frame.series.baselineY)
+                      )}
+                    >
+                      <Path
+                        path={frame.series.fill}
+                        color={withAlpha(theme.upColor, SERIES_AREA_ALPHA)}
+                      />
+                      <Path
+                        path={frame.series.line}
+                        color={theme.upColor}
+                        style="stroke"
+                        strokeWidth={2}
+                      />
+                    </Group>
+                    <Group
+                      clip={Skia.XYWHRect(
+                        0,
+                        frame.series.baselineY,
+                        Math.max(0, plotWidth),
+                        Math.max(
+                          0,
+                          frame.pricePaneHeight - frame.series.baselineY
+                        )
+                      )}
+                    >
+                      <Path
+                        path={frame.series.fill}
+                        color={withAlpha(theme.downColor, SERIES_AREA_ALPHA)}
+                      />
+                      <Path
+                        path={frame.series.line}
+                        color={theme.downColor}
+                        style="stroke"
+                        strokeWidth={2}
+                      />
+                    </Group>
+                    <Line
+                      p1={vec(0, frame.series.baselineY)}
+                      p2={vec(plotWidth, frame.series.baselineY)}
+                      color={theme.axisLineColor}
                       strokeWidth={1}
                     />
                   </>
@@ -937,22 +1279,127 @@ export function Chart(props: ChartProps): ReactElement {
                 />
               ))}
 
-            {/* Last-price line + tag */}
-            {frame && (
-              <Group>
+            {/* Price lines (declarative) — over the series, under the live tag. */}
+            {frame?.priceLineGeoms.map((g, i) => (
+              <Group key={`pln-${i}`}>
                 <Line
-                  p1={vec(0, frame.lastY)}
-                  p2={vec(plotWidth, frame.lastY)}
-                  color={
-                    frame.last.up
-                      ? theme.lastPriceUpColor
-                      : theme.lastPriceDownColor
-                  }
-                  strokeWidth={1}
+                  p1={vec(0, g.y)}
+                  p2={vec(plotWidth, g.y)}
+                  color={g.line.color ?? theme.crosshairColor}
+                  strokeWidth={g.line.lineWidth ?? 1}
                 />
                 <Rect
                   x={plotWidth}
-                  y={frame.lastY - 8}
+                  y={g.y - 8}
+                  width={PRICE_AXIS_WIDTH}
+                  height={16}
+                  color={g.line.color ?? theme.crosshairColor}
+                />
+                {font && (
+                  <Text
+                    x={plotWidth + 4}
+                    y={g.y + 4}
+                    text={g.title}
+                    font={font}
+                    color={theme.crosshairLabelText}
+                  />
+                )}
+              </Group>
+            ))}
+
+            {/* Markers (declarative) — anchored to bars, clipped to the price pane. */}
+            {frame && frame.markerGeoms.length > 0 && (
+              <Group
+                clip={Skia.XYWHRect(
+                  0,
+                  0,
+                  Math.max(0, plotWidth),
+                  Math.max(0, frame.pricePaneHeight)
+                )}
+              >
+                {frame.markerGeoms.map((m, i) => {
+                  const c = m.color ?? theme.crosshairColor;
+                  return (
+                    <Group key={`mk-${i}`}>
+                      {m.shape === 'circle' && (
+                        <Circle cx={m.x} cy={m.y} r={MARKER_SIZE} color={c} />
+                      )}
+                      {m.shape === 'square' && (
+                        <Rect
+                          x={m.x - MARKER_SIZE}
+                          y={m.y - MARKER_SIZE}
+                          width={MARKER_SIZE * 2}
+                          height={MARKER_SIZE * 2}
+                          color={c}
+                        />
+                      )}
+                      {m.path && <Path path={m.path} color={c} />}
+                      {font && m.text && (
+                        <Text
+                          x={m.x + MARKER_SIZE + 2}
+                          y={m.y + 3}
+                          text={m.text}
+                          font={font}
+                          color={c}
+                        />
+                      )}
+                    </Group>
+                  );
+                })}
+              </Group>
+            )}
+
+            {/* Drawings (declarative, data-coord) — clipped to the price pane. */}
+            {frame && frame.drawingGeoms.length > 0 && (
+              <Group
+                clip={Skia.XYWHRect(
+                  0,
+                  0,
+                  Math.max(0, plotWidth),
+                  Math.max(0, frame.pricePaneHeight)
+                )}
+              >
+                {frame.drawingGeoms.map((d, i) =>
+                  d.kind === 'h' ? (
+                    <Line
+                      key={`dr-${i}`}
+                      p1={vec(0, d.y)}
+                      p2={vec(plotWidth, d.y)}
+                      color={d.color}
+                      strokeWidth={1.5}
+                    />
+                  ) : (
+                    <Line
+                      key={`dr-${i}`}
+                      p1={vec(d.x1, d.y1)}
+                      p2={vec(d.x2, d.y2)}
+                      color={d.color}
+                      strokeWidth={1.5}
+                    />
+                  )
+                )}
+              </Group>
+            )}
+
+            {/* Last-price line + tag — tag is clamped inside the price pane; the
+                line is hidden when the latest price is outside the visible range. */}
+            {frame && (
+              <Group>
+                {frame.lastY >= 0 && frame.lastY <= frame.pricePaneHeight && (
+                  <Line
+                    p1={vec(0, frame.lastY)}
+                    p2={vec(plotWidth, frame.lastY)}
+                    color={
+                      frame.last.up
+                        ? theme.lastPriceUpColor
+                        : theme.lastPriceDownColor
+                    }
+                    strokeWidth={1}
+                  />
+                )}
+                <Rect
+                  x={plotWidth}
+                  y={lastTagY - 8}
                   width={PRICE_AXIS_WIDTH}
                   height={16}
                   color={
@@ -964,7 +1411,7 @@ export function Chart(props: ChartProps): ReactElement {
                 {font && (
                   <Text
                     x={plotWidth + 4}
-                    y={frame.lastY + 4}
+                    y={lastTagY + 4}
                     text={formatPrice(frame.last.close, symbol.pricePrecision)}
                     font={font}
                     color={theme.crosshairLabelText}
@@ -1042,6 +1489,59 @@ export function Chart(props: ChartProps): ReactElement {
               ))}
           </Canvas>
         )}
+
+        {/* Connection-status chip (sits just left of the price axis). */}
+        {columns && columns.opens.length > 0 && (
+          <View
+            style={[styles.statusChip, { right: PRICE_AXIS_WIDTH + 8 }]}
+            pointerEvents="none"
+          >
+            <View
+              style={[styles.statusDot, { backgroundColor: statusDotColor }]}
+            />
+            <RNText style={[styles.statusText, { color: theme.axisTextColor }]}>
+              {statusLabel}
+            </RNText>
+          </View>
+        )}
+
+        {/* States: error (with retry) / loading / empty. */}
+        {loadError ? (
+          <View style={styles.overlay} pointerEvents="box-none">
+            <RNText
+              style={[styles.overlayText, { color: theme.axisTextColor }]}
+            >
+              Couldn&apos;t load {symbol.displayName}.
+            </RNText>
+            <Pressable
+              onPress={() => setReloadKey((k) => k + 1)}
+              style={[styles.retryBtn, { borderColor: theme.axisLineColor }]}
+            >
+              <RNText
+                style={[styles.retryText, { color: theme.crosshairLabelText }]}
+              >
+                Retry
+              </RNText>
+            </Pressable>
+          </View>
+        ) : !columns ? (
+          <View style={styles.overlay} pointerEvents="none">
+            <ActivityIndicator color={theme.axisTextColor} />
+            <RNText
+              style={[styles.overlayText, { color: theme.axisTextColor }]}
+            >
+              Loading…
+            </RNText>
+          </View>
+        ) : columns.opens.length === 0 ? (
+          <View style={styles.overlay} pointerEvents="none">
+            <RNText
+              style={[styles.overlayText, { color: theme.axisTextColor }]}
+            >
+              No data
+            </RNText>
+          </View>
+        ) : null}
       </View>
     </GestureDetector>
   );
@@ -1049,4 +1549,27 @@ export function Chart(props: ChartProps): ReactElement {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  overlayText: { fontSize: 14, fontWeight: '500' },
+  retryBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  retryText: { fontSize: 13, fontWeight: '600' },
+  statusChip: {
+    position: 'absolute',
+    top: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusText: { fontSize: 11, fontWeight: '600' },
 });

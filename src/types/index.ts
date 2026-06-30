@@ -1,7 +1,7 @@
 /**
  * Chartston public type surface — the single source of truth (PLAN.md §7).
  *
- * Derived from how real exchanges and TradingView Lightweight Charts shape data
+ * Derived from how real exchanges and common web charting engines shape data
  * (see RESEARCH.md). A consumer can wire Chartston to *any* feed by implementing
  * one small adapter interface ({@link MarketFeedAdapter}) and, optionally, custom
  * studies ({@link StudyDescriptor}).
@@ -218,7 +218,7 @@ export interface StudyDescriptor<S extends StudyState = StudyState> {
 
 /**
  * Built-in overlays drawn on the price pane. `volume` is a faint histogram
- * anchored to the bottom of the price pane, behind the candles (TradingView-style);
+ * anchored to the bottom of the price pane, behind the candles (exchange-style);
  * the others are line series.
  */
 export type OverlayStudyId = 'sma' | 'ema' | 'bollinger' | 'vwap' | 'volume';
@@ -303,6 +303,39 @@ export interface SelectListProps<T> {
 
 export type ChartType = 'candlestick' | 'line' | 'area' | 'bar' | 'baseline';
 
+/** A horizontal price line drawn across the price pane with a right-axis tag. */
+export interface PriceLine {
+  price: number;
+  color?: string;
+  /** Right-axis tag text; defaults to the formatted price. */
+  title?: string;
+  /** `dashed` is reserved; currently rendered solid. */
+  lineStyle?: 'solid' | 'dashed';
+  lineWidth?: number;
+}
+
+/** A marker anchored to a bar (matched by open time), drawn above/below the bar. */
+export interface ChartMarker {
+  /** Bar open time (ms); snapped to the nearest visible bar. */
+  time: number;
+  position?: 'aboveBar' | 'belowBar' | 'inBar';
+  shape?: 'circle' | 'arrowUp' | 'arrowDown' | 'square';
+  color?: string;
+  /** Optional text drawn beside the marker. */
+  text?: string;
+}
+
+/** A point in data coordinates (bar open time + price) so drawings track pan/zoom. */
+export interface DrawingPoint {
+  time: number;
+  price: number;
+}
+
+/** A user drawing: a horizontal price level, or a trend line between two points. */
+export type Drawing =
+  | { kind: 'horizontal'; price: number; color?: string }
+  | { kind: 'trend'; a: DrawingPoint; b: DrawingPoint; color?: string };
+
 export interface ChartProps {
   symbol: SymbolInfo;
   interval: Interval;
@@ -313,6 +346,12 @@ export interface ChartProps {
   activeStudies?: ChartStudiesConfig;
   theme?: ChartTheme;
   chartType?: ChartType;
+  /** Horizontal price lines (alerts/entries) drawn across the price pane. */
+  priceLines?: PriceLine[];
+  /** Markers anchored to bars, matched by open time. */
+  markers?: ChartMarker[];
+  /** Trend + horizontal line drawings in data coords (persist them per-symbol). */
+  drawings?: Drawing[];
   style?: StyleProp<ViewStyle>;
   onCrosshairMove?: (bar: Candle | null, index: number) => void;
   onViewportChange?: (v: Viewport) => void;

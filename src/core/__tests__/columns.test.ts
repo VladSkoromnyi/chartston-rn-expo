@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { candlesToColumns, ingestColumns } from '../columns';
+import { candlesToColumns, ingestColumns, prependColumns } from '../columns';
 import type { Candle } from '../../types';
 
 const bar = (time: number, close = 1.5, volume = 10): Candle => ({
@@ -55,5 +55,39 @@ describe('candle columns — backfill↔live merge contract', () => {
     const b = ingestColumns(candlesToColumns([]), 'patch', bar(1000));
     expect(b.times).toEqual([1000]);
     expect(b.closes).toEqual([1.5]);
+  });
+});
+
+describe('prependColumns — lazy history paging', () => {
+  it('prepends older bars to the front, preserving order', () => {
+    const cur = candlesToColumns([bar(3000, 3), bar(4000, 4)]);
+    const out = prependColumns(cur, [bar(1000, 1), bar(2000, 2)]);
+    expect(out.times).toEqual([1000, 2000, 3000, 4000]);
+    expect(out.closes).toEqual([1, 2, 3, 4]);
+    // immutable: source untouched, fresh array identity
+    expect(cur.times).toEqual([3000, 4000]);
+    expect(out.times).not.toBe(cur.times);
+  });
+
+  it('drops bars at/after the current first bar (seam dedup)', () => {
+    const cur = candlesToColumns([bar(3000, 3), bar(4000, 4)]);
+    // 3000 overlaps the seam and 5000 is newer — both dropped; only 2000 kept
+    const out = prependColumns(cur, [bar(2000, 2), bar(3000, 9), bar(5000, 9)]);
+    expect(out.times).toEqual([2000, 3000, 4000]);
+    expect(out.closes).toEqual([2, 3, 4]); // existing 3000 keeps close 3, not 9
+  });
+
+  it('returns the same columns when there is nothing older to add', () => {
+    const cur = candlesToColumns([bar(3000, 3)]);
+    expect(prependColumns(cur, [])).toBe(cur);
+    expect(prependColumns(cur, [bar(3000, 9), bar(4000, 9)])).toBe(cur);
+  });
+
+  it('prepends onto empty columns', () => {
+    const out = prependColumns(candlesToColumns([]), [
+      bar(1000, 1),
+      bar(2000, 2),
+    ]);
+    expect(out.times).toEqual([1000, 2000]);
   });
 });

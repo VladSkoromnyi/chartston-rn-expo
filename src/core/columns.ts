@@ -77,3 +77,27 @@ export function ingestColumns(
     volumes: [...cols.volumes, c.volume ?? 0],
   };
 }
+
+/**
+ * Prepend OLDER candles to the front (lazy history loading). Bars whose time is at
+ * or after the current first bar are dropped (seam dedup), so the result stays
+ * sorted and gap/overlap-free. Returns NEW arrays (immutable for React). Assumes
+ * `older` is ascending.
+ */
+export function prependColumns(
+  cols: CandleColumns,
+  older: Candle[]
+): CandleColumns {
+  const firstTime = cols.times.length > 0 ? cols.times[0]! : Infinity;
+  const fresh = older.filter((c) => c.time < firstTime);
+  if (fresh.length === 0) return cols;
+  const head = candlesToColumns(fresh);
+  return {
+    times: [...head.times, ...cols.times],
+    opens: [...head.opens, ...cols.opens],
+    highs: [...head.highs, ...cols.highs],
+    lows: [...head.lows, ...cols.lows],
+    closes: [...head.closes, ...cols.closes],
+    volumes: [...head.volumes, ...cols.volumes],
+  };
+}

@@ -1,6 +1,6 @@
 {
   "name": "chartston",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "GPU-accelerated interactive candlestick charting library for React Native / Expo (New Architecture, Skia + Reanimated)",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",

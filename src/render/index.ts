@@ -8,4 +8,4 @@ export * from './geometry';
 export * from './candles';
 export * from './lines';
 export * from './histogram';
-export * from './crosshair';
+export * from './series';

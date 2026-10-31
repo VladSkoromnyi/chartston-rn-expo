@@ -27,6 +27,17 @@ export function formatCompact(n: number, digits = 2): string {
   return n.toFixed(0);
 }
 
+/**
+ * Label for an arbitrary-scale value (custom study pane axes): compact above
+ * 1K, 2 decimals above 1, 3 significant digits below — so 0.0042 doesn't read "0".
+ */
+export function formatAxisValue(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1e3) return formatCompact(n);
+  if (abs >= 1 || abs === 0) return n.toFixed(abs === 0 ? 0 : 2);
+  return n.toPrecision(3);
+}
+
 /** Time-of-day label (UTC HH:MM) for the time axis. */
 export function formatTimeLabel(ms: number): string {
   const d = new Date(ms);

@@ -34,29 +34,37 @@ import {
   Group,
   Line,
   Path,
+  Picture,
   Rect,
   Skia,
   Text,
+  createPicture,
   matchFont,
   vec,
 } from '@shopify/react-native-skia';
-import type { SkPath } from '@shopify/react-native-skia';
+import type { SkPath, SkPicture } from '@shopify/react-native-skia';
 import type {
   Candle,
   CandleUpdate,
   ChartMarker,
   ChartProps,
   ChartStudiesConfig,
+  ChartTheme,
   ConnectionStatus,
   Drawing,
+  PaneDrawContext,
   PaneStudyId,
   PriceLine,
+  StudyDescriptor,
+  Viewport,
 } from '../types';
 import { DARK_THEME } from '../theme';
 import {
   bollinger,
   candlesToColumns,
+  columnsToView,
   ema,
+  formatAxisValue,
   formatCompact,
   formatPrice,
   formatTimeLabel,
@@ -65,15 +73,21 @@ import {
   initialViewport,
   macd,
   niceTicks,
+  padRange,
   prependColumns,
   priceToY,
   rsi,
+  runStudies,
+  seriesExtent,
   sma,
+  studyNeedsReset,
+  throttleTrailing,
+  toViewport,
   visibleRange,
   vwap,
   yToPrice,
 } from '../core';
-import type { CandleColumns } from '../core';
+import type { CandleColumns, StudyRun } from '../core';
 import {
   buildAreaSeries,
   buildBarSeries,
@@ -135,7 +149,11 @@ const MARKER_GAP = 8; // px between a bar's extreme and its marker
 const EMPTY_PRICE_LINES: PriceLine[] = [];
 const EMPTY_MARKERS: ChartMarker[] = [];
 const EMPTY_DRAWINGS: Drawing[] = [];
+const EMPTY_STUDIES: StudyDescriptor[] = [];
 const DRAWING_DEFAULT_COLOR = '#f0b90b';
+
+// onViewportChange cadence — leading + trailing, so the resting viewport lands.
+const VIEWPORT_CHANGE_THROTTLE_MS = 100;
 
 // Connection-status chip labels (Stage 8 "states"). The adapter emits the status.
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
@@ -232,7 +250,8 @@ interface PaneLabel {
   y: number;
 }
 interface SubPane {
-  id: SubPaneId;
+  /** Built-in pane id, or `custom:<study id>`. */
+  id: string;
   title: string;
   top: number;
   height: number;
@@ -240,6 +259,76 @@ interface SubPane {
   lines: PaneLine[];
   guides: PaneGuide[];
   labels: PaneLabel[];
+  /** A custom study's recorded `draw()` output (inner pane coords). */
+  picture?: SkPicture | null;
+}
+
+/** One stacked sub-pane slot: a built-in study or a consumer `StudyDescriptor`. */
+type PaneSlot = { builtin: SubPaneId } | { custom: StudyRun };
+
+/**
+ * Record a custom study's imperative `draw()` into a Skia picture so it can sit in
+ * the declarative scene graph. A throwing `draw` yields no picture (never a crash).
+ */
+function recordStudy(
+  run: StudyRun,
+  ctx: Omit<PaneDrawContext, 'canvas'>
+): SkPicture | null {
+  try {
+    return createPicture(
+      (canvas) => run.descriptor.draw({ ...ctx, canvas }, run.state),
+      { width: ctx.width, height: ctx.height }
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A custom pane study: autoscale to its visible values (10% padding), record its
+ * `draw()`, and label the visible max/min on the right axis. Inner y-space, as
+ * {@link buildSubPane}.
+ */
+function buildCustomPane(
+  run: StudyRun,
+  start: number,
+  end: number,
+  indexToX: (i: number) => number,
+  width: number,
+  top: number,
+  height: number,
+  inner: number,
+  theme: ChartTheme
+): SubPane {
+  const ext = seriesExtent(run.state, start, end);
+  const range = ext ? padRange(ext.min, ext.max, false) : { min: 0, max: 1 };
+  const valueToY = (v: number): number => priceToY(v, range, inner, false);
+  const picture = recordStudy(run, {
+    width,
+    height: inner,
+    indexToX,
+    valueToY,
+    startIndex: start,
+    endIndex: end,
+    theme,
+  });
+  const labels: PaneLabel[] = ext
+    ? [
+        { text: formatAxisValue(ext.max), y: valueToY(ext.max) + 4 },
+        { text: formatAxisValue(ext.min), y: valueToY(ext.min) + 4 },
+      ]
+    : [];
+  return {
+    id: `custom:${run.descriptor.id}`,
+    title: run.descriptor.name,
+    top,
+    height,
+    histograms: [],
+    lines: [],
+    guides: [],
+    labels,
+    picture,
+  };
 }
 
 /** Price-pane series geometry — one variant per ChartType (Stage 8). */
@@ -385,8 +474,11 @@ export function Chart(props: ChartProps): ReactElement {
     theme: themeProp,
     style,
     onCrosshairMove,
+    onViewportChange,
     activeStudies = DEFAULT_ACTIVE_STUDIES,
+    studies: customStudies = EMPTY_STUDIES,
     chartType = 'candlestick',
+    logScale = false,
     priceLines = EMPTY_PRICE_LINES,
     markers = EMPTY_MARKERS,
     drawings = EMPTY_DRAWINGS,
@@ -430,6 +522,16 @@ export function Chart(props: ChartProps): ReactElement {
   const loadingOlder = useRef(false);
   const hasMoreHistory = useRef(true);
   const loadGenRef = useRef(0);
+  // The offset initial positioning just set. Effects in that same commit still
+  // see the old `view` (and a JS read of the shared `offset` is applied async),
+  // so they use this until `view` catches up.
+  const positionedOffset = useRef<number | null>(null);
+  const currentOffset = (): number => {
+    const p = positionedOffset.current;
+    if (p !== null && view.offset !== p) return p;
+    positionedOffset.current = null;
+    return view.offset;
+  };
 
   // Apply a live update (Stage 4–5). Time-keyed so backfill↔live merges correctly:
   // a bar whose open time matches the last bar patches it; a newer one appends.
@@ -525,6 +627,7 @@ export function Chart(props: ChartProps): ReactElement {
     offset.value = init.offset;
     barSpacing.value = init.barSpacing;
     setView({ offset: init.offset, barSpacing: init.barSpacing });
+    positionedOffset.current = init.offset;
     positioned.current = true;
   }, [columns, plotWidth, offset, barSpacing]);
 
@@ -569,11 +672,15 @@ export function Chart(props: ChartProps): ReactElement {
   }, [adapter, symbol, interval, dataLen, offset]);
 
   // Trigger lazy history when the left edge approaches the oldest loaded bar.
+  // Only once positioned at the live edge — the pre-positioning offset 0 used to
+  // page in an older chunk on every load.
   useEffect(() => {
     if (!columns || columns.times.length === 0) return;
-    if (view.offset > EDGE_LOAD_BARS) return;
+    if (!positioned.current) return;
+    if (currentOffset() > EDGE_LOAD_BARS) return;
     if (loadingOlder.current || !hasMoreHistory.current) return;
     loadOlder();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- currentOffset reads view.offset
   }, [view.offset, columns, loadOlder]);
 
   // Mirror viewport + crosshair shared values into React state.
@@ -618,6 +725,29 @@ export function Chart(props: ChartProps): ReactElement {
     };
   }, [columns]);
 
+  // Custom studies (`studies` prop) — compute on data change, handing each study
+  // its previous state while the data only grew/ticked (incremental), or none
+  // after a snapshot / switch / history prepend (indices shifted).
+  const customRunsRef = useRef<{
+    cols: CandleColumns | null;
+    runs: Map<string, StudyRun> | null;
+  }>({ cols: null, runs: null });
+  const customRuns = useMemo(() => {
+    if (!columns || columns.times.length === 0 || customStudies.length === 0) {
+      customRunsRef.current = { cols: null, runs: null };
+      return null;
+    }
+    const prev = customRunsRef.current;
+    const runs = runStudies(
+      customStudies,
+      columnsToView(columns),
+      prev.runs,
+      studyNeedsReset(prev.cols, columns)
+    );
+    customRunsRef.current = { cols: columns, runs };
+    return runs;
+  }, [columns, customStudies]);
+
   const frame = useMemo(() => {
     if (!columns || plotWidth <= 0 || plotHeight <= 0) return null;
     const len = columns.opens.length;
@@ -628,23 +758,36 @@ export function Chart(props: ChartProps): ReactElement {
       barSpacing: view.barSpacing,
       rightPadding: 0,
       pinnedToNow: true,
-      logScale: false,
+      logScale,
     };
     const { start, end } = visibleRange(viewport, plotWidth, len);
+    const centerX = (i: number): number => indexToCenterX(i, viewport);
 
     // --- Vertical pane layout: price pane on top, sub-panes stacked below,
     // all sharing the x-axis. Each sub-pane gets a fixed slice; the price pane
-    // takes the remainder (never below MIN_PRICE_PANE_HEIGHT).
-    const activePaneIds: SubPaneId[] = studies ? activeStudies.panes : [];
+    // takes the remainder (never below MIN_PRICE_PANE_HEIGHT). Built-in panes
+    // come first, then custom pane studies in `studies` order.
+    const customOverlayRuns: StudyRun[] = [];
+    const customPaneRuns: StudyRun[] = [];
+    for (const run of customRuns?.values() ?? []) {
+      (run.descriptor.kind === 'pane'
+        ? customPaneRuns
+        : customOverlayRuns
+      ).push(run);
+    }
     const maxSubPanes = Math.max(
       0,
       Math.floor((plotHeight - MIN_PRICE_PANE_HEIGHT) / SUBPANE_HEIGHT)
     );
-    const paneIds = activePaneIds.slice(0, maxSubPanes);
-    const subPanesTotal = paneIds.length * SUBPANE_HEIGHT;
+    const paneSlots: PaneSlot[] = [
+      ...(studies ? activeStudies.panes : []).map((id) => ({ builtin: id })),
+      ...customPaneRuns.map((run) => ({ custom: run })),
+    ].slice(0, maxSubPanes);
+    const subPanesTotal = paneSlots.length * SUBPANE_HEIGHT;
     const pricePaneHeight = plotHeight - subPanesTotal;
 
-    // --- Price pane autoscale (visible high/low + 10% padding).
+    // --- Price pane autoscale (visible high/low + 10% padding). Log scale only
+    // applies while every visible price is > 0.
     let lo = Infinity;
     let hi = -Infinity;
     for (let i = start; i <= end; i++) {
@@ -654,12 +797,8 @@ export function Chart(props: ChartProps): ReactElement {
       if (h > hi) hi = h;
     }
     if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
-    if (lo === hi) {
-      lo -= 1;
-      hi += 1;
-    }
-    const pad = (hi - lo) * 0.1;
-    const range = { min: lo - pad, max: hi + pad };
+    const log = logScale && lo > 0;
+    const range = padRange(lo, hi, log);
 
     // Price-pane series — candles by default; line/area/bar/baseline per chartType.
     const seriesMap = {
@@ -668,7 +807,7 @@ export function Chart(props: ChartProps): ReactElement {
       rangeMin: range.min,
       rangeMax: range.max,
       height: pricePaneHeight,
-      logScale: false,
+      logScale: log,
     };
     let series: SeriesGeom;
     if (chartType === 'line') {
@@ -706,7 +845,7 @@ export function Chart(props: ChartProps): ReactElement {
           range.min,
           range.max,
           pricePaneHeight,
-          false
+          log
         ),
       };
     }
@@ -725,7 +864,7 @@ export function Chart(props: ChartProps): ReactElement {
         range.min,
         range.max,
         pricePaneHeight,
-        false
+        log
       ),
       color,
       strokeWidth,
@@ -747,6 +886,21 @@ export function Chart(props: ChartProps): ReactElement {
         overlays.push(overlayLine(studies.ema50, OVERLAY_EMA_COLOR));
       if (ov.has('vwap'))
         overlays.push(overlayLine(studies.vwap, OVERLAY_VWAP_COLOR));
+    }
+    // Custom overlay studies — drawn against the price axis, above built-ins.
+    const pricePaneCtx = {
+      width: plotWidth,
+      height: pricePaneHeight,
+      indexToX: centerX,
+      valueToY: (v: number): number => priceToY(v, range, pricePaneHeight, log),
+      startIndex: start,
+      endIndex: end,
+      theme,
+    };
+    const customOverlays: SkPicture[] = [];
+    for (const run of customOverlayRuns) {
+      const pic = recordStudy(run, pricePaneCtx);
+      if (pic) customOverlays.push(pic);
     }
     // Volume overlay — a faint bottom-anchored histogram behind the candles
     // (exchange-style), capped at VOLUME_OVERLAY_FRACTION of the price pane.
@@ -775,7 +929,7 @@ export function Chart(props: ChartProps): ReactElement {
     const priceTicks = niceTicks(range.min, range.max, PRICE_TICK_COUNT)
       .map((value) => ({
         label: formatPrice(value, symbol.pricePrecision),
-        y: priceToY(value, range, pricePaneHeight, false),
+        y: priceToY(value, range, pricePaneHeight, log),
       }))
       .filter((t) => t.y >= 0 && t.y <= pricePaneHeight);
     // Space time labels by pixels (not candle count) and align to step multiples,
@@ -790,24 +944,36 @@ export function Chart(props: ChartProps): ReactElement {
     }
 
     // --- Build each active sub-pane (own y-origin + own autoscale).
-    const subPanes = studies
-      ? paneIds.map((id, p) => {
-          const top = pricePaneHeight + p * SUBPANE_HEIGHT;
-          const h = SUBPANE_HEIGHT;
-          const inner = Math.max(1, h - PANE_PADDING_Y * 2);
-          return buildSubPane(
-            id,
-            studies,
-            start,
-            end,
-            view.offset,
-            view.barSpacing,
-            top,
-            h,
-            inner
-          );
-        })
-      : [];
+    const subPanes = paneSlots.map((slot, p) => {
+      const top = pricePaneHeight + p * SUBPANE_HEIGHT;
+      const h = SUBPANE_HEIGHT;
+      const inner = Math.max(1, h - PANE_PADDING_Y * 2);
+      if ('custom' in slot) {
+        return buildCustomPane(
+          slot.custom,
+          start,
+          end,
+          centerX,
+          plotWidth,
+          top,
+          h,
+          inner,
+          theme
+        );
+      }
+      // Built-in slots only exist when `studies` is computed (see paneSlots).
+      return buildSubPane(
+        slot.builtin,
+        studies!,
+        start,
+        end,
+        view.offset,
+        view.barSpacing,
+        top,
+        h,
+        inner
+      );
+    });
 
     const li = len - 1;
     const last: OHLCV = {
@@ -821,7 +987,7 @@ export function Chart(props: ChartProps): ReactElement {
     // Price lines (declarative) — map to y; keep those inside the price pane.
     const priceLineGeoms = priceLines
       .map((pl) => ({
-        y: priceToY(pl.price, range, pricePaneHeight, false),
+        y: priceToY(pl.price, range, pricePaneHeight, log),
         line: pl,
         title: pl.title ?? formatPrice(pl.price, symbol.pricePrecision),
       }))
@@ -852,11 +1018,11 @@ export function Chart(props: ChartProps): ReactElement {
       const pos = mk.position ?? 'aboveBar';
       const my =
         pos === 'belowBar'
-          ? priceToY(columns.lows[idx]!, range, pricePaneHeight, false) +
+          ? priceToY(columns.lows[idx]!, range, pricePaneHeight, log) +
             MARKER_GAP
           : pos === 'inBar'
-            ? priceToY(columns.closes[idx]!, range, pricePaneHeight, false)
-            : priceToY(columns.highs[idx]!, range, pricePaneHeight, false) -
+            ? priceToY(columns.closes[idx]!, range, pricePaneHeight, log)
+            : priceToY(columns.highs[idx]!, range, pricePaneHeight, log) -
               MARKER_GAP;
       const shape = mk.shape ?? 'circle';
       const path =
@@ -890,7 +1056,7 @@ export function Chart(props: ChartProps): ReactElement {
     for (const d of drawings) {
       const color = d.color ?? DRAWING_DEFAULT_COLOR;
       if (d.kind === 'horizontal') {
-        const y = priceToY(d.price, range, pricePaneHeight, false);
+        const y = priceToY(d.price, range, pricePaneHeight, log);
         if (y >= 0 && y <= pricePaneHeight) {
           drawingGeoms.push({ kind: 'h', y, color });
         }
@@ -901,9 +1067,9 @@ export function Chart(props: ChartProps): ReactElement {
         drawingGeoms.push({
           kind: 't',
           x1: indexToCenterX(ia, viewport),
-          y1: priceToY(d.a.price, range, pricePaneHeight, false),
+          y1: priceToY(d.a.price, range, pricePaneHeight, log),
           x2: indexToCenterX(ib, viewport),
-          y2: priceToY(d.b.price, range, pricePaneHeight, false),
+          y2: priceToY(d.b.price, range, pricePaneHeight, log),
           color,
         });
       }
@@ -922,7 +1088,9 @@ export function Chart(props: ChartProps): ReactElement {
       last,
       pricePaneHeight,
       subPanes,
-      lastY: priceToY(last.close, range, pricePaneHeight, false),
+      customOverlays,
+      log,
+      lastY: priceToY(last.close, range, pricePaneHeight, log),
     };
   }, [
     columns,
@@ -932,7 +1100,10 @@ export function Chart(props: ChartProps): ReactElement {
     symbol.pricePrecision,
     studies,
     activeStudies,
+    customRuns,
     chartType,
+    logScale,
+    theme,
     priceLines,
     markers,
     drawings,
@@ -958,7 +1129,7 @@ export function Chart(props: ChartProps): ReactElement {
         Math.min(pointer.y, frame.pricePaneHeight),
         frame.range,
         frame.pricePaneHeight,
-        false
+        frame.log
       ),
       time: columns.times[index]!,
       ohlcv: {
@@ -989,6 +1160,43 @@ export function Chart(props: ChartProps): ReactElement {
       onCrosshairMove(null, -1);
     }
   }, [cross, columns, onCrosshairMove]);
+
+  // Fire the public viewport callback (throttled; the latest listener is read
+  // through a ref so an inline callback doesn't re-trigger the effect).
+  const onViewportChangeRef = useRef(onViewportChange);
+  onViewportChangeRef.current = onViewportChange;
+  const viewportThrottle = useMemo(
+    () =>
+      throttleTrailing<Viewport>(
+        (v) => onViewportChangeRef.current?.(v),
+        VIEWPORT_CHANGE_THROTTLE_MS
+      ),
+    []
+  );
+  useEffect(() => () => viewportThrottle.cancel(), [viewportThrottle]);
+  const hasViewportListener = onViewportChange !== undefined;
+  const dataLength = columns?.times.length ?? 0;
+  useEffect(() => {
+    if (!hasViewportListener || dataLength === 0 || plotWidth <= 0) return;
+    if (!positioned.current) return; // the pre-positioning offset 0 is not a real view
+    viewportThrottle.call(
+      toViewport(
+        currentOffset(),
+        view.barSpacing,
+        plotWidth,
+        dataLength,
+        logScale
+      )
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- currentOffset reads view.offset
+  }, [
+    hasViewportListener,
+    view,
+    plotWidth,
+    dataLength,
+    logScale,
+    viewportThrottle,
+  ]);
 
   const gesture = useChartGestures({
     offset,
@@ -1250,6 +1458,9 @@ export function Chart(props: ChartProps): ReactElement {
                     strokeWidth={ov.strokeWidth}
                   />
                 ))}
+                {frame.customOverlays.map((pic, i) => (
+                  <Picture key={`cov-${i}`} picture={pic} />
+                ))}
               </Group>
             )}
 
@@ -1289,6 +1500,7 @@ export function Chart(props: ChartProps): ReactElement {
                       strokeWidth={l.strokeWidth}
                     />
                   ))}
+                  {p.picture && <Picture picture={p.picture} />}
                 </Group>
                 {/* Pane title (top-left) + right-axis value labels. */}
                 {font && (

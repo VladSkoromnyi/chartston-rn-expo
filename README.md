@@ -19,11 +19,11 @@ Chartston draws interactive financial charts on the GPU and keeps everything tha
 - **Crosshair & legend** — long-press snaps to the nearest bar with a synchronized OHLCV legend and a last-price tag.
 - **Live streaming** — time-keyed `snapshot` / `append` / `patch` updates (active-bar tick vs. new bar), with no whole-series flicker.
 - **Lazy history** — scroll back toward the start and older candles page in automatically (via the adapter's `endTime`), keeping your viewport in place.
-- **Built-in studies** — SMA, EMA, WMA, Bollinger, RSI, MACD, ATR, Stochastic, VWAP.
+- **Built-in studies** — SMA, EMA, WMA, Bollinger, RSI, MACD, ATR, Stochastic, VWAP — plus **custom studies** via a declarative `StudyDescriptor`.
   - Price-pane **overlays** (SMA / EMA / Bollinger / VWAP) + a faint **volume** histogram behind the candles.
   - **Oscillator sub-panes** (RSI, MACD) that share the x-axis.
 - **Annotations** — `markers`, `priceLines`, and trend / horizontal **drawings** in data coordinates (they track pan & zoom).
-- **Theming** — dark / light out of the box via a fully-typed `ChartTheme`.
+- **Theming** — dark / light out of the box via a fully-typed `ChartTheme`; linear or **log** price axis.
 - **Any data source** — implement a 2-method `MarketFeedAdapter`; a **Binance** reference adapter is included.
 - **States** — loading / empty / error (with retry) + a live connection-status chip.
 - **TypeScript-first** — strict types are a feature, not an afterthought.
@@ -45,7 +45,7 @@ Chartston is **New Architecture only**. Peer dependencies:
 
 ```sh
 npx expo install chartston @shopify/react-native-skia react-native-reanimated react-native-worklets react-native-gesture-handler
-# optional, for the selector sheets (PeriodSelector / SymbolSelector / IndicatorMenu / ChartTypeSelector):
+# optional, for the selector sheets in `chartston/ui` (PeriodSelector / SymbolSelector / IndicatorMenu / ChartTypeSelector):
 npx expo install @gorhom/bottom-sheet
 ```
 
@@ -119,11 +119,70 @@ Time is canonical **epoch milliseconds (UTC)** everywhere; adapters convert at t
   priceLines={[{ price: 65000, title: 'target' }]}
   markers={[{ time: 1719600000000, shape: 'arrowUp', text: 'buy' }]}
   drawings={[{ kind: 'horizontal', price: 64000 }]}
+  logScale={false}                   // logarithmic price axis
   onCrosshairMove={(bar, index) => {/* … */}}
+  onViewportChange={(v) => {/* offset, barSpacing, pinnedToNow… (throttled) */}}
 />
 ```
 
-Drop-in controls (require `@gorhom/bottom-sheet` + a `BottomSheetModalProvider`): `SymbolSelector`, `PeriodSelector`, `IndicatorMenu`, `ChartTypeSelector`, `ThemeSelector`.
+### Custom studies
+
+Ship your own indicator with a `StudyDescriptor`: `compute` turns candles into
+series, `draw` paints them with Skia. Overlays map against the price axis; panes
+stack below the built-ins and autoscale to the study's visible values.
+
+```tsx
+import { Skia } from '@shopify/react-native-skia';
+import type { StudyDescriptor } from 'chartston';
+
+const momentum: StudyDescriptor = {
+  id: 'mom10',
+  kind: 'pane', // or 'overlay'
+  name: 'MOM 10',
+  inputs: { period: 10 },
+  compute(c) {
+    const out = new Float64Array(c.length).fill(NaN);
+    for (let i = 10; i < c.length; i++) out[i] = c.closes[i]! - c.closes[i - 10]!;
+    return { series: { mom: out }, scratch: {}, lastIndex: c.length - 1 };
+  },
+  draw(ctx, s) {
+    const path = Skia.Path.Make();
+    for (let i = ctx.startIndex; i <= ctx.endIndex; i++) {
+      const v = s.series.mom![i]!;
+      if (!Number.isFinite(v)) continue;
+      const [x, y] = [ctx.indexToX(i), ctx.valueToY(v)];
+      path.countPoints() ? path.lineTo(x, y) : path.moveTo(x, y);
+    }
+    const paint = Skia.Paint();
+    paint.setColor(Skia.Color('#00bcd4'));
+    paint.setStyle(1); // stroke
+    paint.setStrokeWidth(1.5);
+    ctx.canvas.drawPath(path, paint);
+  },
+};
+
+<Chart /* … */ studies={[momentum]} />;
+```
+
+`compute` receives its previous state while the data only ticks or grows, so a
+study can recompute just the tail from `prev.lastIndex`; after a symbol switch or
+history prepend it gets none and starts over. A study that throws is skipped.
+
+### Drop-in controls
+
+The selector sheets live in the `chartston/ui` subpath, so the core package has no
+`@gorhom/bottom-sheet` dependency. They need `@gorhom/bottom-sheet` + a
+`BottomSheetModalProvider`:
+
+```tsx
+import {
+  SymbolSelector,
+  PeriodSelector,
+  IndicatorMenu,
+  ChartTypeSelector,
+  ThemeSelector,
+} from 'chartston/ui';
+```
 
 ## How it compares
 

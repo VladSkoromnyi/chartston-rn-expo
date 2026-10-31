@@ -39,3 +39,33 @@ export function autoScale(
   const pad = (max - min) * padding;
   return { min: min - pad, max: max + pad };
 }
+
+/**
+ * Pad a raw [lo, hi] band by `padding` of its span on each side. In log mode the
+ * padding is applied in log space, so the margin looks the same top and bottom
+ * on a log axis and `min` stays > 0. A flat band gets a 1-unit (linear) or ±1%
+ * (log) sliver.
+ */
+export function padRange(
+  lo: number,
+  hi: number,
+  logScale: boolean,
+  padding = 0.1
+): PriceRange {
+  if (logScale && lo > 0) {
+    let a = Math.log(lo);
+    let b = Math.log(hi);
+    if (a === b) {
+      a -= 0.01;
+      b += 0.01;
+    }
+    const pad = (b - a) * padding;
+    return { min: Math.exp(a - pad), max: Math.exp(b + pad) };
+  }
+  if (lo === hi) {
+    lo -= 1;
+    hi += 1;
+  }
+  const pad = (hi - lo) * padding;
+  return { min: lo - pad, max: hi + pad };
+}

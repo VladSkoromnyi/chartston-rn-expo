@@ -2,7 +2,8 @@
   "compilerOptions": {
     "rootDir": ".",
     "paths": {
-      "chartston": ["./src/index"]
+      "chartston": ["./src/index"],
+      "chartston/ui": ["./src/ui/index"]
     },
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,

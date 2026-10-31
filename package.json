@@ -1,6 +1,6 @@
 {
   "name": "chartston",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "GPU-accelerated interactive candlestick charting library for React Native / Expo (New Architecture, Skia + Reanimated)",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
@@ -10,7 +10,19 @@
       "types": "./lib/typescript/src/index.d.ts",
       "default": "./lib/module/index.js"
     },
+    "./ui": {
+      "chartston-source": "./src/ui/index.ts",
+      "types": "./lib/typescript/src/ui/index.d.ts",
+      "default": "./lib/module/ui/index.js"
+    },
     "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "ui": [
+        "./lib/typescript/src/ui/index.d.ts"
+      ]
+    }
   },
   "files": [
     "src",
@@ -25,7 +37,9 @@
     "prepare": "bob build",
     "typecheck": "tsc -p tsconfig.build.json",
     "lint": "eslint src",
-    "test": "vitest run",
+    "test": "vitest run && jest",
+    "test:coverage": "vitest run --coverage",
+    "test:react": "jest",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "bob build && changeset publish"
@@ -68,22 +82,30 @@
     "@eslint/eslintrc": "^3.3.5",
     "@eslint/js": "^10.0.1",
     "@gorhom/bottom-sheet": "5.2.14",
-    "@react-native/babel-preset": "0.85.0",
+    "@react-native/babel-preset": "0.85.3",
     "@react-native/eslint-config": "0.85.0",
+    "@react-native/jest-preset": "0.85.3",
     "@shopify/react-native-skia": "2.6.2",
+    "@testing-library/react-native": "13.3.3",
+    "@types/jest": "29.5.14",
     "@types/react": "^19.2.0",
+    "@types/react-test-renderer": "^19",
+    "@vitest/coverage-v8": "4.1.9",
+    "babel-jest": "29.7.0",
     "del-cli": "^7.0.0",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-ft-flow": "^3.0.11",
     "eslint-plugin-prettier": "^5.5.6",
+    "jest": "29.7.0",
     "prettier": "^3.8.3",
-    "react": "19.2.0",
-    "react-native": "0.83.6",
+    "react": "19.2.3",
+    "react-native": "0.85.3",
     "react-native-builder-bob": "^0.43.0",
     "react-native-gesture-handler": "2.31.1",
     "react-native-reanimated": "4.3.1",
     "react-native-worklets": "0.8.3",
+    "react-test-renderer": "19.2.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   },

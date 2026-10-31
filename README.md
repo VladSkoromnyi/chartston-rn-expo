@@ -2,8 +2,8 @@
 
 > GPU-accelerated, New-Architecture-first **candlestick charting** for React Native & Expo — Skia + Reanimated + Gesture Handler.
 
-<!-- Badges (enable once published + CI is on the default branch) -->
-<!-- [![npm](https://img.shields.io/npm/v/chartston.svg)](https://www.npmjs.com/package/chartston) -->
+[![npm](https://img.shields.io/npm/v/chartston.svg)](https://www.npmjs.com/package/chartston)
+[![CI](https://github.com/VladSkoromnyi/chartston-rn-expo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/VladSkoromnyi/chartston-rn-expo/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 Chartston draws interactive financial charts on the GPU and keeps everything that moves **off the JS thread** (Skia rendering + Reanimated worklet gestures). It targets the **New Architecture** (Expo SDK 56+ / RN 0.79+) and ships exchange-style candlesticks, overlays, oscillator panes, a long-press crosshair, live streaming, theming, and basic drawing tools.
@@ -209,7 +209,9 @@ import {
 
 ## Roadmap
 
-Engine stages 0–8 are complete (render, gestures, crosshair, streaming, real Binance feed, switch UI, studies, theming + chart types + annotations + drawing tools). Currently hardening for the first npm release. Beyond v1: in-chart drawing toolbar, UI-thread geometry rebuild for 60fps @ 10k+ candles, more providers, replay export.
+Pre-1.0 and moving quickly — see [CHANGELOG.md](CHANGELOG.md). Recently: custom studies, log scale, viewport callback, reconnect gap fill, and a rendering path that holds 60 fps at 50k candles with every study on.
+
+Next: a physical-device performance pass, then toward 1.0. Later: an in-chart drawing toolbar, a docs site, more feed providers, replay export.
 
 ## Contributing
 

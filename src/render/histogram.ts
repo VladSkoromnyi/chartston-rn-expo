@@ -8,18 +8,19 @@
 
 import { Skia } from '@shopify/react-native-skia';
 import type { SkPath } from '@shopify/react-native-skia';
+import { makePath } from './geometry';
 
 /** Bar width as a fraction of bar spacing (matches the candle body ratio). */
 const BAR_WIDTH_RATIO = 0.7;
 
 /**
  * Volume-style histogram: every bar grows up from the pane baseline (y=height).
- * `up[i]` routes bar `i` into the up- or down-coloured path so both draw in two
+ * `isUp(i)` routes bar `i` into the up- or down-coloured path so both draw in two
  * GPU calls. `rangeMax` is the top of the value axis (baseline is value 0).
  */
 export function buildVolumeHistogram(
   values: number[],
-  up: boolean[],
+  isUp: (index: number) => boolean,
   start: number,
   end: number,
   offset: number,
@@ -27,8 +28,8 @@ export function buildVolumeHistogram(
   rangeMax: number,
   height: number
 ): { upBars: SkPath; downBars: SkPath } {
-  const upBars = Skia.Path.Make();
-  const downBars = Skia.Path.Make();
+  const upBars = makePath();
+  const downBars = makePath();
   const barWidth = Math.max(1, barSpacing * BAR_WIDTH_RATIO);
   const half = barWidth / 2;
   const span = rangeMax || 1;
@@ -38,11 +39,11 @@ export function buildVolumeHistogram(
     const cx = (i - offset) * barSpacing + barSpacing / 2;
     const h = Math.max(1, (v / span) * height);
     const top = height - h;
-    (up[i] ? upBars : downBars).addRect(
+    (isUp(i) ? upBars : downBars).addRect(
       Skia.XYWHRect(cx - half, top, barWidth, h)
     );
   }
-  return { upBars, downBars };
+  return { upBars: upBars.done(), downBars: downBars.done() };
 }
 
 /**
@@ -60,8 +61,8 @@ export function buildSignedHistogram(
   rangeMax: number,
   height: number
 ): { posBars: SkPath; negBars: SkPath; zeroY: number } {
-  const posBars = Skia.Path.Make();
-  const negBars = Skia.Path.Make();
+  const posBars = makePath();
+  const negBars = makePath();
   const barWidth = Math.max(1, barSpacing * BAR_WIDTH_RATIO);
   const half = barWidth / 2;
   const span = rangeMax - rangeMin || 1;
@@ -79,5 +80,5 @@ export function buildSignedHistogram(
       Skia.XYWHRect(cx - half, top, barWidth, h)
     );
   }
-  return { posBars, negBars, zeroY };
+  return { posBars: posBars.done(), negBars: negBars.done(), zeroY };
 }

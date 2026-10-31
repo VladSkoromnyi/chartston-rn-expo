@@ -146,7 +146,7 @@ const momentum: StudyDescriptor = {
     return { series: { mom: out }, scratch: {}, lastIndex: c.length - 1 };
   },
   draw(ctx, s) {
-    const path = Skia.Path.Make();
+    const path = Skia.PathBuilder.Make();
     for (let i = ctx.startIndex; i <= ctx.endIndex; i++) {
       const v = s.series.mom![i]!;
       if (!Number.isFinite(v)) continue;
@@ -157,7 +157,7 @@ const momentum: StudyDescriptor = {
     paint.setColor(Skia.Color('#00bcd4'));
     paint.setStyle(1); // stroke
     paint.setStrokeWidth(1.5);
-    ctx.canvas.drawPath(path, paint);
+    ctx.canvas.drawPath(path.detach(), paint);
   },
 };
 

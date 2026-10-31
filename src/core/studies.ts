@@ -48,20 +48,38 @@ export function columnsToView(cols: CandleColumns): CandleView {
 }
 
 /**
- * True when `next` is not `prev` plus a live patch/append — i.e. indices shifted
- * or history was replaced — so incremental state is meaningless.
+ * What incremental consumers remember about the columns they last saw. Live
+ * updates grow the column arrays IN PLACE (see `applyUpdates`), so keeping the
+ * columns object itself would not preserve its old length.
+ */
+export interface ColumnsMark {
+  length: number;
+  first: number;
+  last: number;
+}
+
+export function markColumns(cols: CandleColumns): ColumnsMark {
+  const n = cols.times.length;
+  return {
+    length: n,
+    first: n > 0 ? cols.times[0]! : NaN,
+    last: n > 0 ? cols.times[n - 1]! : NaN,
+  };
+}
+
+/**
+ * True when `next` is not the marked data plus a live patch/append — i.e.
+ * indices shifted or history was replaced — so incremental state is meaningless.
  */
 export function studyNeedsReset(
-  prev: CandleColumns | null,
+  prev: ColumnsMark | null,
   next: CandleColumns
 ): boolean {
   if (!prev) return true;
-  const p = prev.times.length;
+  const p = prev.length;
   const n = next.times.length;
   if (p === 0 || n < p) return true;
-  return (
-    prev.times[0] !== next.times[0] || prev.times[p - 1] !== next.times[p - 1]
-  );
+  return prev.first !== next.times[0] || prev.last !== next.times[p - 1];
 }
 
 /**

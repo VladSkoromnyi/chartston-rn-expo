@@ -50,12 +50,12 @@ const rows = (c: CandleColumns): Candle[] =>
     volume: c.volumes[i]!,
   }));
 
-const EMPTY = candlesToColumns([]);
+const empty = () => candlesToColumns([]);
 
 describe('applyUpdates — replayed Binance stream', () => {
   const oneByOne = replay.reduce(
     (cols, u) => applyUpdates(cols, [u]).cols,
-    EMPTY
+    empty()
   );
 
   it('keeps one bar per open time, final values win, stale frame dropped', () => {
@@ -71,7 +71,7 @@ describe('applyUpdates — replayed Binance stream', () => {
 
   it('is batch-invariant: any frame grouping yields the same columns', () => {
     for (const size of [2, 3, 5, replay.length]) {
-      let cols = EMPTY;
+      let cols = empty();
       for (let i = 0; i < replay.length; i += size) {
         cols = applyUpdates(cols, replay.slice(i, i + size)).cols;
       }
@@ -79,9 +79,8 @@ describe('applyUpdates — replayed Binance stream', () => {
     }
   });
 
-  it('reports appends per batch and leaves the input untouched', () => {
+  it('reports appends per batch; grows the arrays in place under a new wrapper', () => {
     const before = candlesToColumns([bar(0, 1)]);
-    const snapshot = JSON.stringify(before);
     const r = applyUpdates(before, [
       { type: 'patch', candle: bar(0, 2) },
       { type: 'append', candle: bar(1, 3) },
@@ -89,7 +88,8 @@ describe('applyUpdates — replayed Binance stream', () => {
     ]);
     expect(r.appended).toBe(2);
     expect(r.cols.closes).toEqual([2, 3, 4]);
-    expect(JSON.stringify(before)).toBe(snapshot);
+    expect(r.cols).not.toBe(before); // React sees a change…
+    expect(r.cols.closes).toBe(before.closes); // …without an O(n) copy
   });
 
   it('flags a batch of only out-of-order frames as unchanged', () => {
@@ -113,7 +113,7 @@ describe('applyUpdates — replayed Binance stream', () => {
 
 describe('mergeRecent — reconnect gap fill', () => {
   // State after the replay: bars 0,1,2 then live bar 6 (2 is a stale mid-bar tick).
-  const live = applyUpdates(EMPTY, replay).cols;
+  const live = applyUpdates(empty(), replay).cols;
   // What REST returns on reopen: bars 0..6 with bar 2 final.
   const page = [
     bar(0, 100.8),

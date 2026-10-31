@@ -6,6 +6,7 @@
 import type { StudyDescriptor } from '../../types';
 
 export * from './calculators';
+export * from './incremental';
 
 const registry = new Map<string, StudyDescriptor>();
 

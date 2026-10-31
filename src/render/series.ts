@@ -5,7 +5,7 @@
  * and the crosshair line up. Mapping is inlined to keep the loops allocation-free.
  */
 
-import { Skia } from '@shopify/react-native-skia';
+import { makePath } from './geometry';
 import type { SkPath } from '@shopify/react-native-skia';
 import type { CandleColumns } from '../core';
 
@@ -45,7 +45,7 @@ export function buildLineSeries(
   end: number,
   m: SeriesMap
 ): SkPath {
-  const path = Skia.Path.Make();
+  const path = makePath();
   const y = yMapper(m);
   let pen = false;
   for (let i = start; i <= end; i++) {
@@ -61,7 +61,7 @@ export function buildLineSeries(
       pen = true;
     }
   }
-  return path;
+  return path.done();
 }
 
 /** First/last finite x positions in the window (to anchor closing fills). */
@@ -91,14 +91,14 @@ export function buildAreaSeries(
   m: SeriesMap
 ): { line: SkPath; area: SkPath } {
   const line = buildLineSeries(closes, start, end, m);
-  const area = line.copy();
+  const area = makePath(line);
   const ext = xExtent(closes, start, end, m);
   if (ext) {
     area.lineTo(ext.lastX, m.height);
     area.lineTo(ext.firstX, m.height);
     area.close();
   }
-  return { line, area };
+  return { line, area: area.done() };
 }
 
 /**
@@ -115,14 +115,14 @@ export function buildBaselineSeries(
 ): { line: SkPath; fill: SkPath; baselineY: number } {
   const baselineY = yMapper(m)(baseline);
   const line = buildLineSeries(closes, start, end, m);
-  const fill = line.copy();
+  const fill = makePath(line);
   const ext = xExtent(closes, start, end, m);
   if (ext) {
     fill.lineTo(ext.lastX, baselineY);
     fill.lineTo(ext.firstX, baselineY);
     fill.close();
   }
-  return { line, fill, baselineY };
+  return { line, fill: fill.done(), baselineY };
 }
 
 /** OHLC bar series: a high–low vertical with a left (open) and right (close) tick. */
@@ -132,8 +132,8 @@ export function buildBarSeries(
   end: number,
   m: SeriesMap
 ): { upBars: SkPath; downBars: SkPath } {
-  const upBars = Skia.Path.Make();
-  const downBars = Skia.Path.Make();
+  const upBars = makePath();
+  const downBars = makePath();
   const y = yMapper(m);
   const tick = Math.max(1, m.barSpacing * BAR_TICK_RATIO);
   for (let i = start; i <= end; i++) {
@@ -151,5 +151,5 @@ export function buildBarSeries(
     p.moveTo(x, yc);
     p.lineTo(x + tick, yc);
   }
-  return { upBars, downBars };
+  return { upBars: upBars.done(), downBars: downBars.done() };
 }

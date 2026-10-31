@@ -39,8 +39,11 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
 
-      - name: Unit tests (core/)
-        run: yarn test
+      - name: Unit tests + coverage gate (core/)
+        run: yarn test:coverage
+
+      - name: Integration tests (<Chart/>)
+        run: yarn test:react
 
   build:
     runs-on: ubuntu-latest

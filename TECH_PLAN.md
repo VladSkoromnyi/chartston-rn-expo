@@ -1,47 +1,38 @@
 # TECH_PLAN.md — Chartston
 
-> **Status: AWAITING HUMAN APPROVAL.** This is the bootstrap deliverable (PLAN.md Part C / Step 5). No
-> production feature code is written until Vlad reviews and approves this plan. Stage 0 (scaffold + harness)
-> is **done and verified**; everything from Stage 1 on is proposed, not built.
+> **Status (2026-11-01): v0.2.0 published to npm; v0.3.0 in progress on `develop`.** Stages 0–9 and the
+> post-0.2 milestones M2–M6 are done (see C.2 and C.6). Remaining before the v0.3.0 release: M8 (Support
+> section) and M7 (release). This file was the bootstrap plan (PLAN.md Part C) and is now the living
+> engineering status.
 >
 > Read alongside [`PLAN.md`](./PLAN.md) (the brief) and [`RESEARCH.md`](./RESEARCH.md) (the behavioral spec).
 
 ---
 
-## 0. Current state — what the bootstrap actually produced (verified)
+## 0. Current state
 
-Two sibling projects under `~/Documents/projects/`:
+Two sibling projects under `~/Developer/` (moved out of iCloud-synced `~/Documents/projects/` on
+2026-10-31 — iCloud was offloading `node_modules` and making every build crawl):
 
 ### `chartston/` — the library (the product)
-- Scaffolded with `create-react-native-library@0.63` as a **JavaScript library** (`--type library`, no native
-  module of its own — it *composes* Skia/Reanimated). Yarn 4 workspace internally; **MIT**; strict TS.
-- **`src/` skeleton** laid down per PLAN §5.1: `core/ render/ gestures/ stream/ ui/ react/ types/` + `theme.ts`.
-  - `types/index.ts` — the **full §7 public type surface** (single source of truth). ✅ complete.
-  - `core/` — **implemented & pure** (Node-testable): `interval.ts` (ms table + calendar-correct `1w`/`1M`
-    flooring), `coords.ts` (index↔x, price↔y inverses, log scale), `autoscale.ts`, `format.ts`,
-    `candle-store.ts` (time-keyed snapshot/append/patch; typed-array `CandleView`). `indicators/` = registry stub.
-  - `render/ gestures/ stream/ ui/ react/hooks` — **typed stubs** with `TODO(stage-N)` markers tying each to the roadmap.
-  - `react/Chart.tsx` — **placeholder** that renders an empty Skia `<Canvas>` with price/time axes + gridlines.
-- **peerDependencies** set: `react >=19`, `react-native >=0.79`, `@shopify/react-native-skia >=2`,
-  `react-native-reanimated >=4`, `react-native-worklets >=0.4`, `react-native-gesture-handler >=2.31`,
-  `@gorhom/bottom-sheet >=5` (optional). Same set installed as devDeps for standalone typecheck/build.
-- **Verified:** `tsc -p tsconfig.build.json` ✅ · `eslint src` ✅ (0 errors) · `bob build` ✅ (19 files → ESM + d.ts).
+- JavaScript library on Skia + Reanimated + Gesture Handler, New Architecture only. Yarn 4, strict TS,
+  ESM build via `react-native-builder-bob`, MIT. **Published:** `chartston@0.2.0` (npm, 2026-06-30).
+- **Entry points:** `chartston` (engine, `<Chart/>`, types, adapters, themes, `core` helpers) and
+  `chartston/ui` (bottom-sheet selectors; `@gorhom/bottom-sheet` is an optional peer used only there).
+- **Layout:** `core/` (pure: intervals, coords, columns + live apply / gap merge, incremental studies,
+  calculators, throttle) · `render/` (Skia path builders via `makePath`) · `react/` (`Chart.tsx` +
+  `frame.ts` geometry + `scene.ts` picture recording) · `gestures/` (UI-thread worklets) · `stream/`
+  (Binance + mock adapters) · `ui/`.
+- **Quality gates (CI):** ESLint/Prettier · `tsc` · vitest `core/` with a coverage gate (lines ≥ 90 %;
+  currently 98 %) · jest `<Chart/>` integration suite · bob build. Manual checklists in `qa/`.
 
-### `chartston-dev-test/` — the harness
-- `create-expo-app@latest` **default template** → **Expo SDK 56 / RN 0.85.3 / React 19.2.3**, New Architecture
-  + React Compiler **on** by default, `expo-router` with `NativeTabs` (bottom tab bar).
-- Linked to the library via **`"chartston": "file:../chartston"`** (npm symlink), resolved to **source** for
-  hot-reload.
-- `metro.config.js` — watches the sibling lib, `disableHierarchicalLookup` + single `nodeModulesPaths` to force
-  **one copy** of the native singletons, `chartston-source` export condition for source resolution.
-- `babel.config.js` — `babel-preset-expo` + **`react-native-worklets/plugin` last**.
-- Root wrapped in `GestureHandlerRootView`; **tab 1 = full-screen `<Chart/>`** fed by a `MockFeedAdapter`.
-- **Verified:** `tsc --noEmit` ✅ · **native dev-client build (EAS local) running on the iPhone 17 Pro sim ✅** —
-  the placeholder `<Chart/>` renders (dark theme, price/time axes + gridlines), no redbox, Metro bundle clean (1998 modules).
-- **Metro single-copy fix (found on first device run):** the initial `disableHierarchicalLookup` approach broke
-  resolution of reanimated's *nested* `semver` (`Unable to resolve module semver/functions/satisfies`). Replaced with
-  a targeted `resolver.resolveRequest` that redirects **only the singletons** to the app's copy and leaves hierarchical
-  resolution intact. Verified on device.
+### `chartston-dev-test/` — the demo app (harness)
+- Expo SDK 56 / RN 0.85.3 / React 19.2.3 dev client, linked to the library **by source** (Metro
+  `chartston-source` condition + single-copy resolver for native singletons).
+- Tabs: **Home** (live Binance chart with every control, annotation tools, `Log` / `Custom` / `1s` /
+  `Drop 8s` test switches, viewport readout) · **Demo** (deterministic `DEMO / USD` feed; the README GIF
+  scenes) · **Stress** (500 / 10k / 50k candles on a 16 ms feed with UI/JS fps meters).
+- All visual / device verification goes through this app (iOS Simulator).
 
 ### Deltas found during bootstrap (detail in `RESEARCH.md` §14)
 | # | Finding | Resolution |
@@ -104,15 +95,15 @@ a green QA checklist. Each stage branches off `develop` as `feat/stage-N-*` and 
 | Stage | Goal | Key deliverables | New QA | Exit criteria |
 |---|---|---|---|---|
 | **0 — Scaffold** ✅ | Skeleton + harness | §5.1 dirs, full `types/`, pure `core/`, placeholder `<Chart/>`, linked harness | — | **lib tsc/lint/bob ✅, harness tsc ✅, native run on iOS sim ✅** (placeholder renders; Metro clean). |
-| **1 — Static render** ⏳ | Draw candles | `render/candles` ✅ (body/wick + up/down/border colors), grid + axis lines ✅, `<Chart/>` adapter→store→autoscale→draw ✅; **next:** `SkFont` axis labels, typed-array rect/line buffers | rendering group | 500-candle dataset renders on device ✅ (`feat/stage-1-static-render`); pixel-correct-vs-reference (with labels) pending. |
-| **2 — Viewport & gestures** ✅ | Navigate at scale | `gestures/` (pan/pinch/momentum) ✅, shared-value viewport + clipping + autoscale ✅, devDeps aligned to Expo 56 ✅ | gestures@10k | **pan/pinch verified on device** (animates on change). Follow-up: move rebuild to the UI thread for 60fps@10k (JS rebuild for now — worklet-built paths were flaky). |
-| **3 — Crosshair & legend** | Inspect bars | long-press snap-to-index crosshair, synchronized OHLCV legend, last-price line | crosshair cases | crosshair reports correct bar; `onCrosshairMove` fires. |
-| **4 — Streaming core** ✅ | Live "on the fly" | `core/columns` patch/append wiring ✅, **mock feed** live ticks ✅, pin-to-now advance ✅; **follow-up:** ring-buffer + rAF coalescing for high-freq feeds | live-streaming group | **verified on sim** — active bar close/volume + last-price line update each tick, no whole-series flicker. |
+| **1 — Static render** ✅ | Draw candles | `render/candles` ✅ (body/wick + up/down/border colors), grid + axis lines ✅, `<Chart/>` adapter→store→autoscale→draw ✅; `SkFont` axis labels ✅ | rendering group | 500-candle dataset renders on device ✅. Pixel-diff vs a reference image never automated — covered by `qa/rendering.md`. |
+| **2 — Viewport & gestures** ✅ | Navigate at scale | `gestures/` (pan/pinch/momentum) ✅, shared-value viewport + clipping + autoscale ✅, devDeps aligned to Expo 56 ✅ | gestures@10k | **pan/pinch verified on device** (animates on change). Follow-up done in M5: per-frame redraw no longer goes through React (60 fps @ 10k/50k on sim). |
+| **3 — Crosshair & legend** ✅ | Inspect bars | long-press snap-to-index crosshair, synchronized OHLCV legend, last-price line | crosshair cases | ✅ crosshair snaps to bars; `onCrosshairMove` fires (verified on sim; drives the demo app's annotation tools). |
+| **4 — Streaming core** ✅ | Live "on the fly" | `core/columns` patch/append wiring ✅, **mock feed** live ticks ✅, pin-to-now advance ✅; ≤ 1 apply per frame + in-place columns ✅ (M4/M5) | live-streaming group | **verified on sim** — active bar close/volume + last-price line update each tick, no whole-series flicker. |
 | **5 — WS engine + Binance** ✅ | Real live data | Binance REST+WS ✅, time-keyed backfill↔live merge ✅, reconnect (backoff+jitter) + staleness heartbeat ✅, status surfacing ✅ | reconnect group | **verified on sim with REAL BTCUSDT 1m** — backfill+live, active-bar patch + new-bar append with view-advance. Forced-disconnect reconnect: logic in place, not exercised here. |
 | **6 — Switch UI** ✅ | Generic UI | `SelectList→BottomSheet→onSelect` ✅ + PeriodSelector ✅ + SymbolSelector (searchable) ✅ | switch group | **verified on sim** — sheet opens, interval switch loads new data; race-safe via `<Chart/>` re-subscribe. |
 | **7 — Studies** ✅ | Bottom-line + overlays | 9 pure calculators (SMA/EMA/WMA, Bollinger, RSI/ATR Wilder, MACD, Stochastic, VWAP) + **vitest suite (29 tests)** ✅; SMA/EMA/Bollinger/VWAP **overlays** ✅; Volume/RSI/MACD **sub-panes** (multi-pane layout: per-pane y-origin + autoscale, shared x-axis) ✅; **IndicatorMenu** (multi-select on `SelectList`) + typed `activeStudies` prop ✅ | indicator group (vitest) | **rendering verified on sim** — overlays + 3 sub-panes draw with correct colors/scales/separators, crosshair/legend/last-price intact; calc values unit-tested vs. reference. Menu tap-toggle + gestures = Vlad's finger-test. (`StudyDescriptor` declarative built-ins deferred — the curated built-in set is wired natively.) |
 | **8 — Theming & polish** ✅ (code) | Production feel | dark/light **ThemeSelector** ✅; **chart types** line/area/bar/baseline + ChartTypeSelector ✅; **markers + price lines** (declarative) ✅; **basic drawing tools** (trend + horizontal, data-coord, per-symbol) ✅; **states** (loading/empty/error+retry + connection-status chip from `onStatus`) ✅ | states + theme | **code-verified** (lib tsc/eslint/**33** tests + harness tsc + bundle 200); dev-stage audit done — removed no-op stubs (StreamEngine / react hooks / drawCrosshair). **Device finger-test pending** (screenshots off) → merge to develop after. In-chart drawing-mode toolbar = v2. |
-| **9 — Release** ⏳ (groundwork done) | Ship OSS | **CI** (lint/typecheck/**33 tests**/bob) ✅, **Changesets** ✅ (config + cli + scripts + initial changeset; `changeset status` green), **real README** + PR template ✅, JS-only `files` + stale Expo-55 `example`/turbo retired ✅ | full regression | **GATED on Vlad:** `npm publish` (needs NPM_TOKEN + go-ahead) · demo GIFs (device capture) · subpath `chartston/ui` decision (C.4 #3) · optional Docusaurus site. CI green; `npx`-installable once published. |
+| **9 — Release** ✅ (v0.1.0, v0.2.0) | Ship OSS | **CI** (lint/typecheck/**33 tests**/bob) ✅, **Changesets** ✅ (config + cli + scripts + initial changeset; `changeset status` green), **real README** + PR template ✅, JS-only `files` + stale Expo-55 `example`/turbo retired ✅ | full regression | ✅ v0.2.0 on npm. Demo GIFs → M2 ✅; `chartston/ui` → M3 ✅; Docusaurus → v2. |
 
 Drawing tools beyond basics, multi-provider adapters, replay-export → **v2**.
 
@@ -203,22 +194,35 @@ core engine has zero UI deps. Recommended; flagged for your call (affects the `e
 
 ---
 
-## Decisions I need from you before Stage 1
+## C.6 Post-0.2 milestones (agreed 2026-10-31)
 
-1. **Native smoke test — ✅ DONE.** The EAS-local dev-client build runs on the iPhone 17 Pro sim; the placeholder
-   chart renders and the single-copy Metro config is fixed + verified. Stage 0 is fully complete.
-2. **GitHub identity.** `author`/`repo` URLs use a placeholder handle (`vlad-skoromnyi`). Confirm the real
-   org/handle before any publish.
-3. **Subpath exports** (`chartston` vs `chartston/ui`) to make bottom-sheet optional — yes/no? (C.4)
-4. **Version-alignment policy** — pin the library's reanimated/worklets/GH devDeps to the exact Expo SDK 56 pins
-   (build fidelity), or keep slightly-ahead floors? (Delta #2/#3)
-5. **Monetization split** (carry-forward, not built): record the intended open-core boundary (Pro = advanced
-   studies / more drawing tools / multi-provider adapters / replay-export) so `core/` stays clean for a Pro layer.
+Order: **M3 → M4 → M5 → M6 → M2 → M1 → M8 → M7**. Each on its own branch off `develop`, verified in the
+demo app, merged `--no-ff`.
 
----
+| Milestone | Status | What landed |
+|---|---|---|
+| **M3 — API completeness** | ✅ `feat/api-completeness` | custom `studies: StudyDescriptor[]` (overlays + panes, incremental compute, throwing study skipped); `logScale`; `onViewportChange` (throttled ~100 ms, trailing); `chartston/ui` subpath (**breaking**); fix: no extra history page on every load |
+| **M4 — Stream hardening** | ✅ `feat/stream-hardening` | reconnect gap fill (`mergeRecent`, REST corrects closed bars); live ticks coalesced to ≤ 1 apply per frame (`applyUpdates`); replay-fixture tests |
+| **M5 — Performance** | ✅ `feat/perf` | incremental built-in studies; in-place column writes; React-free per-frame scene (SkPicture in a shared value); `SkPathBuilder` migration. 50k / 10k with every study: JS 14 / 35 → 61 / 60 fps idle, 60–61 fps panning (sim, debug) |
+| **M6 — QA & tests** | ✅ `feat/qa` | `qa/` checklists (57 cases); `core/` coverage gate; jest `<Chart/>` integration suite (14); fix: overlays used removed `StyleSheet.absoluteFillObject` |
+| **M2 — Demo GIFs** | ✅ `feat/demo-gifs` | 5 GIFs in `docs/media/` (0.7–1.1 MB) from the Demo tab; `scripts/make-gif.sh` |
+| **M1 — Docs sync** | ✅ `chore/docs-sync` | this update; `main` back-merged into `develop` |
+| **M8 — Support section** | ⏳ | README "Support" section (Monobank, Payoneer) — last task before release |
+| **M7 — Release v0.3.0** | ⏳ | `develop → stage → release_0.3.0_<date> → main`, tag, `npm publish` **only on Vlad's explicit go** |
 
-## Confirmation gate
+### Resolved decisions
+| Question (from the bootstrap) | Decision |
+|---|---|
+| Subpath exports `chartston/ui` | **Yes** — shipped in M3 (breaking for 0.2 imports; called out in the changeset). |
+| GitHub identity | `VladSkoromnyi/chartston-rn-expo` (live). |
+| Version alignment | Library devDeps pinned to the demo app's Expo 56 versions (RN 0.85.3, React 19.2.3); peer ranges stay broad. |
+| Docusaurus site | **v2.** A Next.js site exists in the sibling `chartston-docs` repo. |
+| Demo media | iOS Simulator only for now; no Android capture. |
 
-Per PLAN Part E: the bootstrap produced **`RESEARCH.md`**, the **`chartston` skeleton**, the **`chartston-dev-test`
-harness**, and **this `TECH_PLAN.md`**. **I am stopping here for your review.** On approval (and your answers
-above), engineering proceeds **Stage 1**, one branch at a time, harness kept green.
+### Known follow-ups (not scheduled)
+- **Physical-device + release-build** performance pass (TECH_PLAN target) — run `qa/performance.md`.
+- Time-axis labels need seconds on sub-minute intervals (all read `HH:MM` on `1s`).
+- Markers whose time is outside the view snap to the nearest *visible* bar (pinned at the edge).
+- Status chip reads *Offline* rather than *Reconnecting…* when an adapter reports `closed` after `reconnecting`.
+- A true UI-thread (worklet) geometry rebuild — only if device numbers fall short after M5.
+- Monetization split (open-core boundary) — still a carry-forward note, nothing built.

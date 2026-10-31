@@ -17,6 +17,7 @@
 
 import { Skia } from '@shopify/react-native-skia';
 import type { SkPath } from '@shopify/react-native-skia';
+import { makePath } from './geometry';
 import type { CandleColumns } from '../core/columns';
 
 export interface CandleGeometry {
@@ -40,10 +41,10 @@ export function buildCandleGeometry(
   height: number,
   logScale: boolean
 ): CandleGeometry {
-  const upBodies = Skia.Path.Make();
-  const downBodies = Skia.Path.Make();
-  const upWicks = Skia.Path.Make();
-  const downWicks = Skia.Path.Make();
+  const upBodies = makePath();
+  const downBodies = makePath();
+  const upWicks = makePath();
+  const downWicks = makePath();
 
   const bodyWidth = Math.max(1, barSpacing * BODY_WIDTH_RATIO);
   const half = bodyWidth / 2;
@@ -85,5 +86,10 @@ export function buildCandleGeometry(
     wicks.lineTo(cx, yLow);
   }
 
-  return { upBodies, downBodies, upWicks, downWicks };
+  return {
+    upBodies: upBodies.done(),
+    downBodies: downBodies.done(),
+    upWicks: upWicks.done(),
+    downWicks: downWicks.done(),
+  };
 }

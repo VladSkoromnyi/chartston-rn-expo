@@ -37,3 +37,24 @@ export function visibleRange(
   const end = Math.min(candleCount - 1, Math.ceil(viewport.offset + visible));
   return { start, end };
 }
+
+/**
+ * The public {@link Viewport} for the current pan/zoom state. `pinnedToNow` is
+ * true when the newest bar is on screen (so the next append advances the view).
+ */
+export function toViewport(
+  offset: number,
+  barSpacing: number,
+  plotWidth: number,
+  candleCount: number,
+  logScale: boolean
+): Viewport {
+  const visible = barSpacing > 0 ? plotWidth / barSpacing : 0;
+  return {
+    offset,
+    barSpacing,
+    rightPadding: 0,
+    pinnedToNow: offset + visible >= candleCount - 1,
+    logScale,
+  };
+}

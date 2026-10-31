@@ -4,6 +4,9 @@
 >
 > **How Claude Code must use it.** Execute Part B (the bootstrap sequence) **in order**. The final bootstrap step is **not** to start coding — it is to produce `TECH_PLAN.md` (per Part C) and **stop for human confirmation**. No production feature code is written until the human approves `TECH_PLAN.md`.
 >
+> **Note (2026-10-31):** the projects now live in `~/Developer/` (`chartston`, `chartston-dev-test`,
+> `chartston-docs`), moved out of iCloud-synced `~/Documents/projects/`. Paths below are the original brief's.
+
 > **Where to save this file.** `~/Documents/projects/chartston/PLAN.md` once the directory exists (see Step 3). Until then, keep it alongside the workspace.
 
 ---

@@ -6,6 +6,7 @@ import {
   columnsToView,
   runStudies,
   seriesExtent,
+  markColumns,
   studyNeedsReset,
 } from '../studies';
 import { throttleTrailing } from '../throttle';
@@ -108,17 +109,26 @@ describe('studyNeedsReset', () => {
     expect(studyNeedsReset(null, base)).toBe(true);
   });
   it('continues across a live patch or append', () => {
-    expect(studyNeedsReset(base, ingestColumns(base, 'patch', bar(4, 1)))).toBe(
-      false
-    );
-    expect(studyNeedsReset(base, ingestColumns(base, 'append', bar(5)))).toBe(
-      false
-    );
+    expect(
+      studyNeedsReset(
+        markColumns(base),
+        ingestColumns(base, 'patch', bar(4, 1))
+      )
+    ).toBe(false);
+    expect(
+      studyNeedsReset(markColumns(base), ingestColumns(base, 'append', bar(5)))
+    ).toBe(false);
   });
   it('resets when history is prepended or replaced', () => {
-    expect(studyNeedsReset(base, prependColumns(base, bars(-3, 0)))).toBe(true);
-    expect(studyNeedsReset(base, candlesToColumns(bars(10, 20)))).toBe(true);
-    expect(studyNeedsReset(base, candlesToColumns(bars(0, 3)))).toBe(true);
+    expect(
+      studyNeedsReset(markColumns(base), prependColumns(base, bars(-3, 0)))
+    ).toBe(true);
+    expect(
+      studyNeedsReset(markColumns(base), candlesToColumns(bars(10, 20)))
+    ).toBe(true);
+    expect(
+      studyNeedsReset(markColumns(base), candlesToColumns(bars(0, 3)))
+    ).toBe(true);
   });
 });
 
@@ -150,7 +160,12 @@ describe('runStudies', () => {
     const a = candlesToColumns(bars(0, 3));
     const r1 = runStudies([d], columnsToView(a), null, true);
     const b = ingestColumns(a, 'patch', bar(2, 1));
-    const r2 = runStudies([d], columnsToView(b), r1, studyNeedsReset(a, b));
+    const r2 = runStudies(
+      [d],
+      columnsToView(b),
+      r1,
+      studyNeedsReset(markColumns(a), b)
+    );
     expect(calls.map((c) => c.from)).toEqual([0, 2]);
     // 100 + 101 + 1 (patched last close)
     expect(r2.get('sum')!.state.series.sum![2]).toBe(202);

@@ -60,6 +60,7 @@ import type {
 } from '../types';
 import { DARK_THEME } from '../theme';
 import {
+  applyUpdates,
   bollinger,
   candlesToColumns,
   columnsToView,
@@ -69,9 +70,9 @@ import {
   formatPrice,
   formatTimeLabel,
   indexToCenterX,
-  ingestColumns,
   initialViewport,
   macd,
+  mergeRecent,
   niceTicks,
   padRange,
   prependColumns,
@@ -515,10 +516,10 @@ export function Chart(props: ChartProps): ReactElement {
   });
   const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
   const positioned = useRef(false);
-  const lastTimeRef = useRef(-Infinity);
-  // Lazy-history loading state (refs — not reactive).
+  // Latest columns — the source of truth for live / merge / prepend writes. Set
+  // in the same step as every `setColumns` (React state lags a commit behind).
   const columnsRef = useRef<CandleColumns | null>(null);
-  columnsRef.current = columns;
+  // Lazy-history loading state (refs — not reactive).
   const loadingOlder = useRef(false);
   const hasMoreHistory = useRef(true);
   const loadGenRef = useRef(0);
@@ -533,43 +534,69 @@ export function Chart(props: ChartProps): ReactElement {
     return view.offset;
   };
 
-  // Apply a live update (Stage 4–5). Time-keyed so backfill↔live merges correctly:
-  // a bar whose open time matches the last bar patches it; a newer one appends.
-  const applyUpdate = useCallback(
-    (u: CandleUpdate) => {
-      if (u.type === 'snapshot') {
-        setColumns(candlesToColumns(u.candles));
-        dataLen.value = u.candles.length;
-        lastTimeRef.current =
-          u.candles.length > 0
-            ? u.candles[u.candles.length - 1]!.time
-            : -Infinity;
-        positioned.current = false;
-        return;
-      }
-      const c = u.candle;
-      const last = lastTimeRef.current;
-      let action: 'patch' | 'append';
-      if (c.time > last) action = 'append';
-      else if (c.time === last) action = 'patch';
-      else return; // out of order — ignore
-      if (action === 'append') {
-        const prevLen = dataLen.value;
-        const newLen = prevLen + 1;
-        dataLen.value = newLen;
-        lastTimeRef.current = c.time;
-        // Advance the view if it was pinned to the live edge.
-        const bs = barSpacing.value;
-        const visible = bs > 0 ? plotWidthRef.current / bs : 0;
-        const wasPinned = offset.value + visible >= prevLen - 1;
-        if (wasPinned && plotWidthRef.current > 0) {
-          offset.value = Math.max(0, newLen - Math.floor(visible));
-        }
-      }
-      setColumns((prev) => (prev ? ingestColumns(prev, action, c) : prev));
+  const commitColumns = useCallback(
+    (next: CandleColumns) => {
+      columnsRef.current = next;
+      dataLen.value = next.times.length;
+      setColumns(next);
     },
-    [dataLen, offset, barSpacing]
+    [dataLen]
   );
+
+  // Live-edge following: if the newest of `len` bars is on screen, a grow should
+  // keep it there.
+  const isAtLiveEdge = useCallback(
+    (len: number): boolean => {
+      const bs = barSpacing.value;
+      const w = plotWidthRef.current;
+      if (bs <= 0 || w <= 0) return false;
+      return offset.value + w / bs >= len - 1;
+    },
+    [offset, barSpacing]
+  );
+  const snapToLiveEdge = useCallback(
+    (len: number) => {
+      const bs = barSpacing.value;
+      const w = plotWidthRef.current;
+      if (bs <= 0 || w <= 0) return;
+      offset.value = Math.max(0, len - Math.floor(w / bs));
+    },
+    [offset, barSpacing]
+  );
+
+  // Live updates (Stage 4–5) are queued and folded in once per animation frame,
+  // so a fast feed costs at most one re-render per frame. Time-keyed, so
+  // backfill↔live merges correctly (see `applyUpdates`).
+  const pendingUpdates = useRef<CandleUpdate[]>([]);
+  const flushFrame = useRef<number | null>(null);
+  const flushUpdates = useCallback(() => {
+    flushFrame.current = null;
+    const queue = pendingUpdates.current;
+    pendingUpdates.current = [];
+    const prev = columnsRef.current ?? candlesToColumns([]);
+    const r = applyUpdates(prev, queue);
+    if (r.unchanged) return;
+    if (r.replaced) {
+      positioned.current = false;
+    } else if (r.appended > 0 && isAtLiveEdge(prev.times.length)) {
+      snapToLiveEdge(r.cols.times.length);
+    }
+    commitColumns(r.cols);
+  }, [commitColumns, isAtLiveEdge, snapToLiveEdge]);
+  const enqueueUpdate = useCallback(
+    (u: CandleUpdate) => {
+      pendingUpdates.current.push(u);
+      if (flushFrame.current === null) {
+        flushFrame.current = requestAnimationFrame(flushUpdates);
+      }
+    },
+    [flushUpdates]
+  );
+  const dropPendingUpdates = useCallback(() => {
+    if (flushFrame.current !== null) cancelAnimationFrame(flushFrame.current);
+    flushFrame.current = null;
+    pendingUpdates.current = [];
+  }, []);
 
   // Load history, then subscribe for live patch/append updates.
   useEffect(() => {
@@ -582,23 +609,63 @@ export function Chart(props: ChartProps): ReactElement {
     loadGenRef.current += 1;
     hasMoreHistory.current = true;
     loadingOlder.current = false;
+    const gen = loadGenRef.current;
+
+    // Reconnect gap fill: once the stream has dropped, the next `open` re-fetches
+    // the latest page and merges it by time — inserting bars missed while down,
+    // even if live bars already landed past the gap (TECH_PLAN C.3 #2).
+    let dropped = false;
+    const backfillGap = () => {
+      adapter
+        .fetchHistory({
+          symbol,
+          interval,
+          limit: HISTORY_PAGE_SIZE,
+          signal: controller.signal,
+        })
+        .then((recent) => {
+          const prev = columnsRef.current;
+          if (cancelled || gen !== loadGenRef.current || !prev) return;
+          const m = mergeRecent(prev, recent, interval);
+          if (m.mode === 'noop') return;
+          if (m.mode === 'replace') {
+            positioned.current = false; // outage outlasted a page — re-fit
+          } else if (isAtLiveEdge(prev.times.length)) {
+            snapToLiveEdge(m.cols.times.length);
+          } else {
+            // Keep the bars on screen put: shift by inserts left of the view.
+            const left = offset.value;
+            const shift = m.insertedAt.filter((i) => i < left).length;
+            if (shift > 0) offset.value = left + shift;
+          }
+          commitColumns(m.cols);
+        })
+        .catch(() => {
+          // transient — the next reconnect retries
+        });
+    };
+
     adapter
       .fetchHistory({ symbol, interval, signal: controller.signal })
       .then((candles) => {
         if (cancelled) return;
-        setColumns(candlesToColumns(candles));
-        dataLen.value = candles.length;
-        lastTimeRef.current =
-          candles.length > 0 ? candles[candles.length - 1]!.time : -Infinity;
+        commitColumns(candlesToColumns(candles));
         positioned.current = false;
         unsubscribe = adapter.subscribe({
           symbol,
           interval,
           onUpdate: (u) => {
-            if (!cancelled) applyUpdate(u);
+            if (!cancelled) enqueueUpdate(u);
           },
-          onStatus: (s) => {
-            if (!cancelled) setStatus(s);
+          onStatus: (st) => {
+            if (cancelled) return;
+            setStatus(st);
+            if (st === 'reconnecting' || st === 'error' || st === 'closed') {
+              dropped = true;
+            } else if (st === 'open' && dropped) {
+              dropped = false;
+              backfillGap();
+            }
           },
         });
       })
@@ -612,8 +679,20 @@ export function Chart(props: ChartProps): ReactElement {
       cancelled = true;
       controller.abort();
       unsubscribe?.();
+      dropPendingUpdates();
     };
-  }, [adapter, symbol, interval, dataLen, applyUpdate, reloadKey]);
+  }, [
+    adapter,
+    symbol,
+    interval,
+    reloadKey,
+    offset,
+    commitColumns,
+    enqueueUpdate,
+    dropPendingUpdates,
+    isAtLiveEdge,
+    snapToLiveEdge,
+  ]);
 
   // Position at the live edge once data + size are known.
   useEffect(() => {
@@ -659,8 +738,9 @@ export function Chart(props: ChartProps): ReactElement {
         return;
       }
       // Prepend, then shift the viewport by the added count so it stays put.
-      setColumns((prev) => (prev ? prependColumns(prev, older) : prev));
-      dataLen.value += added;
+      const latest = columnsRef.current;
+      if (!latest) return;
+      commitColumns(prependColumns(latest, older));
       offset.value += added;
       setView((v) => ({ ...v, offset: v.offset + added }));
       if (older.length < HISTORY_PAGE_SIZE) hasMoreHistory.current = false;
@@ -669,7 +749,7 @@ export function Chart(props: ChartProps): ReactElement {
     } finally {
       if (gen === loadGenRef.current) loadingOlder.current = false;
     }
-  }, [adapter, symbol, interval, dataLen, offset]);
+  }, [adapter, symbol, interval, offset, commitColumns]);
 
   // Trigger lazy history when the left edge approaches the oldest loaded bar.
   // Only once positioned at the live edge — the pre-positioning offset 0 used to

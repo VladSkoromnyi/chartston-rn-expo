@@ -12,3 +12,5 @@ export * from './indicators';
 export * from './viewport';
 export * from './ticks';
 export * from './columns';
+export * from './studies';
+export * from './throttle';

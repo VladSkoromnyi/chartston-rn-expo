@@ -10,7 +10,9 @@ Chartston draws interactive financial charts on the GPU and keeps everything tha
 
 > **Status: pre-release (`0.x`), active development.** The public API is close to stable but may still shift before `1.0`.
 
-<!-- TODO(stage-9): demo GIF (pan/zoom + live ticks + crosshair) -->
+<p align="center">
+  <img src="https://raw.githubusercontent.com/VladSkoromnyi/chartston-rn-expo/main/docs/media/hero.gif" width="320" alt="Live candlestick chart: ticks streaming in, panning and pinch-zooming" />
+</p>
 
 ## Features
 
@@ -27,6 +29,14 @@ Chartston draws interactive financial charts on the GPU and keeps everything tha
 - **Any data source** — implement a 2-method `MarketFeedAdapter`; a **Binance** reference adapter is included.
 - **States** — loading / empty / error (with retry) + a live connection-status chip.
 - **TypeScript-first** — strict types are a feature, not an afterthought.
+
+## Demo
+
+| Crosshair & legend | Studies & panes | Chart types & themes | Lazy history |
+|---|---|---|---|
+| <img src="https://raw.githubusercontent.com/VladSkoromnyi/chartston-rn-expo/main/docs/media/crosshair.gif" width="200" alt="Long-press crosshair snapping to bars with price and time tags" /> | <img src="https://raw.githubusercontent.com/VladSkoromnyi/chartston-rn-expo/main/docs/media/studies.gif" width="200" alt="Volume, SMA, EMA, Bollinger, VWAP overlays and RSI, MACD panes being added" /> | <img src="https://raw.githubusercontent.com/VladSkoromnyi/chartston-rn-expo/main/docs/media/types.gif" width="200" alt="Candles, bars, line, area and baseline in dark and light themes" /> | <img src="https://raw.githubusercontent.com/VladSkoromnyi/chartston-rn-expo/main/docs/media/history.gif" width="200" alt="Flicking back through history as older pages load" /> |
+
+<sub>Recorded on the iOS Simulator from the dev app's Demo tab with a synthetic, deterministic feed. Regenerate with [`scripts/make-gif.sh`](scripts/make-gif.sh) — see [docs/media](docs/media/README.md).</sub>
 
 ## Requirements
 

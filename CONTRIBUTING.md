@@ -6,92 +6,59 @@ We want this community to be friendly and respectful to each other. Please follo
 
 ## Development workflow
 
-This project is a monorepo managed using [Yarn workspaces](https://yarnpkg.com/features/workspaces). It contains the following packages:
+The library lives in this repository. It is developed against a separate Expo
+demo app, **`chartston-dev-test`**, checked out as a sibling folder
+(`../chartston-dev-test`) and linked to this package's **source** — edits here
+hot-reload there, no build step.
 
-- The library package in the root directory.
-- An example app in the `example/` directory.
-
-To get started with the project, make sure you have the correct version of [Node.js](https://nodejs.org/) installed. See the [`.nvmrc`](./.nvmrc) file for the version used in this project.
-
-Run `yarn` in the root directory to install the required dependencies for each package:
+To get started, install the [Node.js](https://nodejs.org/) version in
+[`.nvmrc`](./.nvmrc), then install dependencies with Yarn (npm is not supported):
 
 ```sh
 yarn
 ```
 
-> Since the project relies on Yarn workspaces, you cannot use [`npm`](https://github.com/npm/cli) for development without manually migrating.
-
-The [example app](/example/) demonstrates usage of the library. You need to run it to test any changes you make.
-
-It is configured to use the local version of the library, so any changes you make to the library's source code will be reflected in the example app. Changes to the library's JavaScript code will be reflected in the example app without a rebuild, but native code changes will require a rebuild of the example app.
-
-You can use various commands from the root directory to work with the project.
-
-To start the packager:
+Run the demo app (Expo dev client, iOS Simulator or a device):
 
 ```sh
-yarn example start
+cd ../chartston-dev-test && npx expo start --dev-client
 ```
 
-To run the example app on Android:
+Its **Home** tab exercises every feature against a live Binance feed; the
+**Stress** tab runs 500 / 10k / 50k candles on a fast mock feed with fps meters.
+Verify UI changes there — unit tests can't see pixels or gestures.
+
+### Checks
 
 ```sh
-yarn example android
+yarn lint            # ESLint + Prettier (yarn lint --fix to format)
+yarn typecheck       # TypeScript
+yarn test            # everything below
+yarn test:coverage   # core/ unit tests (vitest) + the ≥ 90 % line-coverage gate
+yarn test:react      # <Chart/> integration tests (jest + Testing Library)
+yarn prepare         # build lib/ with react-native-builder-bob
 ```
 
-To run the example app on iOS:
+- **`src/core/**/*.test.ts`** — vitest, plain Node. Pure math, data and
+  indicators; keep `core/` free of React / Skia so it stays testable here.
+- **`src/react/__tests__/*.test.tsx`** — jest with the React Native preset. A
+  fake feed adapter drives the real `<Chart/>` pipeline; Skia is replaced by a
+  recording canvas (`skia-mock.ts`) so tests assert what was drawn.
+- **[`qa/`](./qa/)** — manual checklists for gestures, rendering, real network
+  and device performance. Run the S1 + S2 cases on a physical device before a
+  release.
 
-```sh
-yarn example ios
-```
-
-To confirm that the app is running with the new architecture, you can check the Metro logs for a message like this:
-
-```sh
-Running "ChartstonExample" with {"fabric":true,"initialProps":{"concurrentRoot":true},"rootTag":1}
-```
-
-Note the `"fabric":true` and `"concurrentRoot":true` properties.
-
-To run the example app on Web:
-
-```sh
-yarn example web
-```
-
-Make sure your code passes TypeScript:
-
-```sh
-yarn typecheck
-```
-
-To check for linting errors, run the following:
-
-```sh
-yarn lint
-```
-
-To fix formatting errors, run the following:
-
-```sh
-yarn lint --fix
-```
-
-
+CI runs lint, typecheck, both test suites (with the coverage gate) and the
+build on every push and PR.
 
 ### Scripts
 
-The `package.json` file contains various scripts for common tasks:
+- `yarn`: install dependencies.
+- `yarn lint` / `yarn typecheck`: static checks.
+- `yarn test`, `yarn test:coverage`, `yarn test:react`: tests (see above).
+- `yarn prepare`: build the package.
+- `yarn changeset`: describe a user-facing change for the changelog.
 
-- `yarn`: setup project by installing dependencies.
-- `yarn typecheck`: type-check files with TypeScript.
-  - `yarn lint`: lint files with [ESLint](https://eslint.org/).
-    - `yarn example start`: start the Metro server for the example app.
-- `yarn example android`: run the example app on Android.
-- `yarn example ios`: run the example app on iOS.
-  - `yarn example web`: run the example app on Web.
-- `yarn example build:web`: build the example app for Web.
-  
 ### Branching & release workflow
 
 This project uses **three long-lived branches** plus **dated release branches**:

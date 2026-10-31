@@ -599,7 +599,11 @@ export function Chart(props: ChartProps): ReactElement {
 
   return (
     <GestureDetector gesture={gesture}>
-      <View style={[styles.fill, style]} onLayout={onLayout}>
+      <View
+        testID="chartston-chart"
+        style={[styles.fill, style]}
+        onLayout={onLayout}
+      >
         {width > 0 && height > 0 && (
           <Canvas style={styles.fill}>
             <Picture picture={picture} />
@@ -666,7 +670,12 @@ export function Chart(props: ChartProps): ReactElement {
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    // Explicit (StyleSheet.absoluteFillObject is gone in RN 0.85).
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,

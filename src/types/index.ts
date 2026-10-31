@@ -187,19 +187,38 @@ export interface StudyState {
   lastIndex: number;
 }
 
-/** Drawing surface handed to a study's `draw()` (Skia layer). */
+/**
+ * Drawing surface handed to a study's `draw()` (Skia layer). Coordinates are
+ * local to the pane: (0,0) is its top-left, `width`×`height` its plot area. The
+ * pane is clipped, so drawing outside it is harmless.
+ */
 export interface PaneDrawContext {
   canvas: SkCanvas;
   width: number;
   height: number;
+  /** Bar index → center x (px) of that bar. */
   indexToX: (index: number) => number;
+  /** Study value → y (px). Overlays map against the price axis; panes autoscale to the study's visible values. */
   valueToY: (value: number) => number;
+  /** Inclusive range of bar indices currently on screen — loop only over these. */
+  startIndex: number;
+  endIndex: number;
   theme: ChartTheme;
 }
 
 /**
  * A study described declaratively so a consumer can ship their own.
  * `compute` is pure & incremental; `draw` paints `state` onto a pane.
+ *
+ * Compute contract: `prev` is the state from the previous call, or `undefined`
+ * when the data was replaced (symbol/interval switch, snapshot, older history
+ * prepended) — recompute everything then. With `prev`, only bars from
+ * `prev.lastIndex` onward are new or changed (the bar at `prev.lastIndex` may
+ * have been patched by a live tick), so an incremental study recomputes from there.
+ * Returning fresh arrays every call is also fine; it's just slower.
+ *
+ * Pane studies autoscale to the finite values of every `state.series` entry in
+ * view. A study that throws is skipped (it never takes the chart down).
  */
 export interface StudyDescriptor<S extends StudyState = StudyState> {
   id: string;
@@ -346,6 +365,8 @@ export interface ChartProps {
   activeStudies?: ChartStudiesConfig;
   theme?: ChartTheme;
   chartType?: ChartType;
+  /** Logarithmic price axis (ignored while the visible range touches ≤ 0). Default `false`. */
+  logScale?: boolean;
   /** Horizontal price lines (alerts/entries) drawn across the price pane. */
   priceLines?: PriceLine[];
   /** Markers anchored to bars, matched by open time. */
@@ -354,5 +375,10 @@ export interface ChartProps {
   drawings?: Drawing[];
   style?: StyleProp<ViewStyle>;
   onCrosshairMove?: (bar: Candle | null, index: number) => void;
+  /**
+   * Fires when the visible window changes (pan, zoom, live advance, history
+   * prepend, log toggle). Throttled to ~100 ms with a trailing call, so the
+   * final resting viewport is always delivered.
+   */
   onViewportChange?: (v: Viewport) => void;
 }

@@ -25,17 +25,6 @@ export interface ApplyResult {
 
 const KEYS = ['times', 'opens', 'highs', 'lows', 'closes', 'volumes'] as const;
 
-function copyColumns(c: CandleColumns): CandleColumns {
-  return {
-    times: c.times.slice(),
-    opens: c.opens.slice(),
-    highs: c.highs.slice(),
-    lows: c.lows.slice(),
-    closes: c.closes.slice(),
-    volumes: c.volumes.slice(),
-  };
-}
-
 function writeBar(c: CandleColumns, i: number, bar: Candle): void {
   c.times[i] = bar.time;
   c.opens[i] = bar.open;
@@ -48,23 +37,24 @@ function writeBar(c: CandleColumns, i: number, bar: Candle): void {
 /**
  * Apply queued updates in order with the time-keyed contract: a bar whose time
  * equals the last bar patches it, a newer one appends, an older one is dropped.
- * (`append`/`patch` from the feed is advisory — only `time` decides.) Columns are
- * copied at most once per call, so the result is a NEW object (React-friendly)
- * and the input is never mutated.
+ * (`append`/`patch` from the feed is advisory — only `time` decides.)
+ *
+ * The column ARRAYS are written in place (O(1) per tick instead of copying six
+ * n-length arrays every frame — the M5 stress profile), and a changed result
+ * comes back as a NEW wrapper object so React still sees the change. Anything
+ * that needs the old length must remember it (see `markColumns`).
  */
 export function applyUpdates(
   cols: CandleColumns,
   updates: readonly CandleUpdate[]
 ): ApplyResult {
   let out = cols;
-  let owned = false;
   let appended = 0;
   let replaced = false;
   let changed = false;
   for (const u of updates) {
     if (u.type === 'snapshot') {
       out = candlesToColumns(u.candles);
-      owned = true;
       replaced = true;
       changed = true;
       appended = 0;
@@ -74,10 +64,6 @@ export function applyUpdates(
     const last = n > 0 ? out.times[n - 1]! : -Infinity;
     const t = u.candle.time;
     if (t < last) continue; // out of order — dropped
-    if (!owned) {
-      out = copyColumns(out);
-      owned = true;
-    }
     if (t === last) {
       writeBar(out, n - 1, u.candle);
     } else {
@@ -86,7 +72,12 @@ export function applyUpdates(
     }
     changed = true;
   }
-  return { cols: out, appended, replaced, unchanged: !changed };
+  return {
+    cols: changed && out === cols ? { ...cols } : out,
+    appended,
+    replaced,
+    unchanged: !changed,
+  };
 }
 
 export interface MergeResult {

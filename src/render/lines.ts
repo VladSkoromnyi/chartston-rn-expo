@@ -3,8 +3,8 @@
  * `NaN` warmup values break the line so the indicator starts where it's defined.
  */
 
-import { Skia } from '@shopify/react-native-skia';
 import type { SkPath } from '@shopify/react-native-skia';
+import { makePath } from './geometry';
 
 export function buildLinePath(
   values: number[],
@@ -17,7 +17,7 @@ export function buildLinePath(
   height: number,
   logScale: boolean
 ): SkPath {
-  const path = Skia.Path.Make();
+  const path = makePath();
   const span = rangeMax - rangeMin || 1;
   const lmin = logScale ? Math.log(rangeMin) : 0;
   const lspan = logScale ? Math.log(rangeMax) - lmin : 1;
@@ -38,5 +38,5 @@ export function buildLinePath(
       pen = true;
     }
   }
-  return path;
+  return path.done();
 }

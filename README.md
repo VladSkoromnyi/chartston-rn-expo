@@ -219,6 +219,17 @@ Next: a physical-device performance pass, then toward 1.0. Later: an in-chart dr
 - [Sending a pull request](CONTRIBUTING.md#sending-a-pull-request)
 - [Code of conduct](CODE_OF_CONDUCT.md)
 
+## Support
+
+Chartston is free and MIT-licensed, built and maintained in my spare time. If it saves you time and you'd like to support its development, a contribution of any size is appreciated — and entirely optional. Starring the repo, reporting bugs and sending PRs help just as much.
+
+| Method | Details |
+|---|---|
+| Monobank USD card (Ukraine) | `4441 1110 8279 6867` |
+| Payoneer | `vlad.skoromnyi.work@gmail.com` |
+
+Thank you! 💙💛
+
 ## License
 
 MIT © [Vlad Skoromnyi](https://github.com/VladSkoromnyi)
